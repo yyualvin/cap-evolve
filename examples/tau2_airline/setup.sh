@@ -63,16 +63,18 @@ echo "  tau2-bench installed @ $TAU2_SHA"
 PROJECT="$REPO/.capevolve/project"
 # (c) Wire the integration the agent authored: adapter + RITS shim + seed capability + spec.
 mkdir -p "$PROJECT/adapters"
-cp "$EX_DIR/adapters/adapter.py" "$EX_DIR/adapters/rits.py" "$PROJECT/adapters/"
+cp "$EX_DIR"/adapters/*.py "$PROJECT/adapters/"
 rm -rf "$PROJECT/seed_capability"; cp -R "$EX_DIR/seed_capability" "$PROJECT/seed_capability"
-cp "$EX_DIR/capevolve.yaml" "$EX_DIR/capevolve.smoke.yaml" \
-   "$EX_DIR/split_ids.json" "$EX_DIR/smoke_split.json" "$PROJECT/"
+cp "$EX_DIR"/capevolve*.yaml "$EX_DIR"/split_ids.json "$EX_DIR"/smoke_split.json "$PROJECT/"
 echo "  project scaffolded + integration wired at $PROJECT"
 
 say "3/3  Hard gate — cap-evolve check (credentials + adapter contract)"
 if [ -z "${RITS_API_KEY:-}" ] && ! grep -q '^RITS_API_KEY=' "$REPO/.env" 2>/dev/null; then
-  echo "  WARNING: RITS_API_KEY not set and not in $REPO/.env — the run needs it (agent + user simulator)."
+  echo "  WARNING: RITS_API_KEY not set and not in $REPO/.env — default run.sh needs it (agent + user simulator)."
+fi
+if ! command -v claude >/dev/null 2>&1 && [ -z "${CLAUDE_BIN:-}" ]; then
+  echo "  NOTE: claude CLI not on PATH — run_claude_agent.sh / smoke_claude_agent.sh need Claude Code installed."
 fi
 PYTHONPATH="$PROJECT/adapters" "$VENV/bin/cap-evolve" check "$PROJECT" || die "cap-evolve check did not pass"
 
-printf '\n\033[1;32mREADY.\033[0m  Next:\n  bash %s/run.sh     # full run (10 iters · 50 tasks · 10 trials) + live dashboard\n  bash %s/smoke.sh   # 2-task autonomy smoke (cheap)\n' "$EX_DIR" "$EX_DIR"
+printf '\n\033[1;32mREADY.\033[0m  Next:\n  bash %s/run.sh                  # full run (RITS gpt-oss) + live dashboard\n  bash %s/smoke.sh                # 2-task RITS smoke (cheap)\n  bash %s/run_claude_agent.sh     # full run (Claude Code CLI eval + optimizer)\n  bash %s/smoke_claude_agent.sh   # 2-task Claude Code smoke (cheap)\n' "$EX_DIR" "$EX_DIR" "$EX_DIR" "$EX_DIR"

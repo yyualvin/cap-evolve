@@ -1,0 +1,33 @@
+# TEST — Claude Code CLI eval + optimizer on 5 tasks (1 trial, 1 iter).
+capabilities: [system-prompt, tools]
+capability_path: seed_capability
+actions: [edit]
+capability_sources: [seed_capability/reference/data_model.py]
+
+optimizer_skill: claude-code
+optimizer_model: claude-haiku-4-5
+optimizer_max_turns: 40
+optimizer_usd_per_iter: 10.0
+
+algorithm_skill: hill-climb
+algorithm_focus: all
+
+dataset_source: adapter
+split_seed: 0
+split_train: 0.5
+split_val: 0.25
+split_test: 0.25
+split_ids_file: split_5.json
+
+num_trials: 1
+
+gate_mode: paired
+gate_k_se: 1.0
+
+max_iterations: 1
+stall: 0
+max_metric_calls: 0
+max_usd: 50.0
+max_optimizer_usd: 25.0
+
+store: git
