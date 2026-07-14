@@ -32,6 +32,99 @@ from cap_evolve import CapabilityAdapter, Rollout, Score, Task
 
 DOMAIN = "airline"
 
+# Set once when claude_code_agent mode is first used.
+_claude_agent_registered = False
+
+
+def _agent_mode() -> str:
+    """``rits`` (default) or ``claude_code`` (Claude Code CLI eval agent)."""
+    import os
+
+    return os.environ.get("TAU2_AGENT_MODE", "rits").strip().lower()
+
+
+def _ensure_claude_agent_registered() -> None:
+    """Register ``claude_code_agent`` with tau2's registry (idempotent)."""
+    global _claude_agent_registered
+    if _claude_agent_registered:
+        return
+    from claude_code_agent import create_claude_code_agent
+    from tau2.registry import registry
+
+    registry.register_agent_factory(create_claude_code_agent, "claude_code_agent")
+    _claude_agent_registered = True
+
+
+def _build_run_config(*, num_trials: int, seed: int):
+    """Build a ``TextRunConfig`` for the active agent mode (RITS or Claude Code)."""
+    import os
+
+    from tau2.data_model.simulation import TextRunConfig
+
+    mode = _agent_mode()
+    if mode == "claude_code":
+        _ensure_claude_agent_registered()
+        import anthropic_user
+
+        agent_model = os.environ.get("TAU2_CLAUDE_AGENT_MODEL", "claude-sonnet-4-6")
+        max_concurrency = int(os.environ.get("TAU2_MAX_CONCURRENCY", "2"))
+
+        # User simulator: RITS → Vertex (Claude Code on GCP) → direct Anthropic API.
+        llm_user = None
+        llm_args_user = None
+        try:
+            import rits
+
+            llm_args_user = dict(rits.llm_args())
+            llm_user = rits.LITELLM_MODEL
+        except Exception:
+            try:
+                import vertex_llm
+
+                if vertex_llm.available():
+                    llm_user = vertex_llm.user_model()
+                    llm_args_user = dict(vertex_llm.llm_args())
+                else:
+                    raise RuntimeError("vertex not configured")
+            except Exception:
+                llm_user = anthropic_user.user_model()
+                llm_args_user = dict(anthropic_user.llm_args())
+
+        return TextRunConfig(
+            domain=DOMAIN,
+            agent="claude_code_agent",
+            llm_agent=agent_model,
+            llm_args_agent={},
+            user="user_simulator",
+            llm_user=llm_user,
+            llm_args_user=llm_args_user,
+            num_trials=num_trials,
+            max_steps=100,
+            max_errors=10,
+            max_concurrency=max_concurrency,
+            seed=int(seed),
+        )
+
+    import rits
+
+    llm_args = rits.llm_args()
+    default_concurrency = "100" if num_trials == 1 else "125"
+    max_concurrency = int(os.environ.get("TAU2_MAX_CONCURRENCY", default_concurrency))
+    return TextRunConfig(
+        domain=DOMAIN,
+        agent="llm_agent",
+        llm_agent=rits.LITELLM_MODEL,
+        llm_args_agent=dict(llm_args),
+        user="user_simulator",
+        llm_user=rits.LITELLM_MODEL,
+        llm_args_user=dict(llm_args),
+        num_trials=num_trials,
+        max_steps=100,
+        max_errors=10,
+        max_concurrency=max_concurrency,
+        seed=int(seed),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Candidate building helpers (pure; no network)
@@ -157,11 +250,10 @@ class Adapter(CapabilityAdapter):
         Builds a RITS-backed ``TextRunConfig`` and calls ``run_tasks`` with
         ``num_trials=1`` (cap-evolve owns trials) and ``seed=int(seed)`` so each
         cap-evolve trial is an independent draw. Returns ``{task_id: Rollout}``.
-        """
-        import os
 
-        import rits  # sibling module
-        from tau2.data_model.simulation import TextRunConfig
+        When ``TAU2_AGENT_MODE=claude_code``, uses the custom ``claude_code_agent``
+        (headless ``claude -p`` per turn) instead of RITS ``llm_agent``.
+        """
         from tau2.runner import run_tasks
 
         by_id = self._tau2_tasks_by_id()
@@ -177,23 +269,7 @@ class Adapter(CapabilityAdapter):
         if not tau2_tasks:
             return results
 
-        llm_args = rits.llm_args()
-        max_concurrency = int(os.environ.get("TAU2_MAX_CONCURRENCY", "100"))
-
-        config = TextRunConfig(
-            domain=DOMAIN,
-            agent="llm_agent",
-            llm_agent=rits.LITELLM_MODEL,
-            llm_args_agent=dict(llm_args),
-            user="user_simulator",
-            llm_user=rits.LITELLM_MODEL,
-            llm_args_user=dict(llm_args),
-            num_trials=1,
-            max_steps=100,
-            max_errors=10,
-            max_concurrency=max_concurrency,
-            seed=int(seed),
-        )
+        config = _build_run_config(num_trials=1, seed=int(seed))
 
         # tau2's run_tasks reconfigures loguru to print() and emits progress to
         # STDOUT. The cap-evolve skills' stdout is a pure-JSON contract, so redirect
@@ -272,6 +348,7 @@ class Adapter(CapabilityAdapter):
                 "tau2_reward": reward,
                 "tau2_reward_info": reward_info_dump,
                 "termination_reason": str(term),
+                "agent_mode": _agent_mode(),
             },
         )
 
@@ -287,11 +364,9 @@ class Adapter(CapabilityAdapter):
         in trial order, None-filling any (task, trial) tau2 didn't produce. This is
         much faster than looping ``run_batch`` per trial because tau2 schedules the
         whole task×trial grid under one concurrency pool.
-        """
-        import os
 
-        import rits  # sibling module
-        from tau2.data_model.simulation import TextRunConfig
+        When ``TAU2_AGENT_MODE=claude_code``, uses the custom ``claude_code_agent``.
+        """
         from tau2.runner import run_tasks
 
         n_trials = int(n_trials)
@@ -312,23 +387,7 @@ class Adapter(CapabilityAdapter):
         if not tau2_tasks or n_trials <= 0:
             return results
 
-        llm_args = rits.llm_args()
-        max_concurrency = int(os.environ.get("TAU2_MAX_CONCURRENCY", "125"))
-
-        config = TextRunConfig(
-            domain=DOMAIN,
-            agent="llm_agent",
-            llm_agent=rits.LITELLM_MODEL,
-            llm_args_agent=dict(llm_args),
-            user="user_simulator",
-            llm_user=rits.LITELLM_MODEL,
-            llm_args_user=dict(llm_args),
-            num_trials=n_trials,
-            max_steps=100,
-            max_errors=10,
-            max_concurrency=max_concurrency,
-            seed=int(base_seed),
-        )
+        config = _build_run_config(num_trials=n_trials, seed=int(base_seed))
 
         # tau2 prints progress to stdout; the cap-evolve skills' stdout is a pure-JSON
         # contract, so redirect tau2's stdout to stderr for the duration.

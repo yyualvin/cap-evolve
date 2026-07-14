@@ -163,3 +163,76 @@ any static host — `report.md`, `events.jsonl`, `TAU2_COMMIT.txt`). See
 - On a small held-out val the paired gate will correctly refuse gains it cannot
   distinguish from noise — that is the system working, not failing. More trials or a
   larger val give a real gain the statistical power to clear the gate.
+
+---
+
+## 8. Claude Code CLI as eval agent + optimizer (staged)
+
+The default path (sections 1–7) uses **RITS `gpt-oss-120b`** as the tau2 eval agent and
+**Claude Code** only as the optimizer. An alternate mode uses **Claude Code CLI**
+(`claude -p`) as the eval agent **and** Claude Code as the optimizer — both roles share
+`ANTHROPIC_API_KEY` (or a logged-in session), but the capability optimized is still the
+airline **policy + tools**.
+
+### Prerequisites (Claude agent mode)
+
+- Everything in section 1, **plus**:
+- **`claude` CLI** on PATH (Claude Code installed).
+- **User simulator credentials** (the eval agent + optimizer use your Claude Code session;
+  the simulated *customer* still needs LiteLLM API access). Pick one:
+  - **Google Vertex** (Claude Code on Vertex): same GCP project as your Claude Code setup:
+    ```
+    ANTHROPIC_VERTEX_PROJECT_ID=<gcp-project>
+    CLOUD_ML_REGION=global
+    GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json   # or gcloud ADC
+    ```
+  - **Direct Anthropic API:** `ANTHROPIC_API_KEY=...`
+  - **RITS** (optional, cheaper user sim only): `RITS_API_KEY` + `RITS_API_URL`
+
+### Staged rollout (cost warning)
+
+Each simulation **turn** spawns a `claude -p` process. A 50-task × 10-trial × 10-iter run
+is likely prohibitive. Use this order:
+
+1. **Validate** one task standalone (no cap-evolve budget):
+
+   ```bash
+   export TAU2_AGENT_MODE=claude_code TAU2_MAX_CONCURRENCY=1
+   PYTHONPATH=.capevolve/project/adapters .venv/bin/python \
+     examples/tau2_airline/scripts/validate_claude_agent.py
+   ```
+
+2. **Smoke** (2 tasks, 1 trial, 1 iter):
+
+   ```bash
+   bash examples/tau2_airline/smoke_claude_agent.sh
+   ```
+
+3. **Staged full** (50 tasks, 3 trials, 5 iters, concurrency 2):
+
+   ```bash
+   cap-evolve estimate --spec .capevolve/project/capevolve.claude-agent.yaml
+   bash examples/tau2_airline/run_claude_agent.sh
+   ```
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TAU2_AGENT_MODE` | `rits` | Set to `claude_code` for Claude CLI eval agent |
+| `TAU2_CLAUDE_AGENT_MODEL` | `claude-sonnet-4-6` | Model passed to `claude -p` each turn |
+| `TAU2_MAX_CONCURRENCY` | `2` (claude mode) | Parallel simulations (keep low) |
+| `TAU2_USER_MODEL` | `vertex_ai/claude-haiku-4-5` (Vertex) or `anthropic/claude-haiku-4-5` (direct) | User simulator model |
+| `ANTHROPIC_VERTEX_PROJECT_ID` | — | GCP project for Vertex user sim (with `CLOUD_ML_REGION`) |
+| `CLOUD_ML_REGION` | `global` | Vertex region (matches Claude Code Vertex config) |
+| `TAU2_CLAUDE_AGENT_MAX_TURNS` | `3` | `--max-turns` per `claude -p` invocation |
+| `TAU2_CLAUDE_AGENT_TIMEOUT` | `300` | Subprocess timeout (seconds) per turn |
+
+### Spec files
+
+- Smoke: [`capevolve.claude-agent.smoke.yaml`](../examples/tau2_airline/capevolve.claude-agent.smoke.yaml)
+- Staged full: [`capevolve.claude-agent.yaml`](../examples/tau2_airline/capevolve.claude-agent.yaml)
+
+Both set `optimizer_skill: claude-code` and `runner_model: claude-sonnet-4-6` (for
+`cap-evolve estimate`). Runner cost is **not** free in this mode — run `cap-evolve estimate`
+before spending.
