@@ -61,7 +61,7 @@ echo "  tau2-bench installed @ $TAU2_SHA"
 "$PY" "$REPO/skills/phases/intake/scripts/run.py" --base "$REPO/.capevolve" --workdir "$REPO" --force >/dev/null \
   || die "intake scaffold failed"
 PROJECT="$REPO/.capevolve/project"
-# (c) Wire the integration the agent authored: adapter + RITS shim + seed capability + spec.
+# (c) Wire the integration the agent authored: adapter + provider shim + seed capability + spec.
 mkdir -p "$PROJECT/adapters"
 cp "$EX_DIR/adapters/adapter.py" "$EX_DIR/adapters/rits.py" "$PROJECT/adapters/"
 rm -rf "$PROJECT/seed_capability"; cp -R "$EX_DIR/seed_capability" "$PROJECT/seed_capability"
@@ -70,8 +70,11 @@ cp "$EX_DIR/capevolve.yaml" "$EX_DIR/capevolve.smoke.yaml" \
 echo "  project scaffolded + integration wired at $PROJECT"
 
 say "3/3  Hard gate — cap-evolve check (credentials + adapter contract)"
-if [ -z "${RITS_API_KEY:-}" ] && ! grep -q '^RITS_API_KEY=' "$REPO/.env" 2>/dev/null; then
-  echo "  WARNING: RITS_API_KEY not set and not in $REPO/.env — the run needs it (agent + user simulator)."
+# Default agent/user = Vertex Claude (ADC). Override with TAU2_AGENT_MODEL / TAU2_USER_MODEL.
+if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] && ! command -v gcloud >/dev/null 2>&1; then
+  echo "  WARNING: No GOOGLE_APPLICATION_CREDENTIALS and no gcloud — Vertex ADC may be missing."
+  echo "           Run: gcloud auth application-default login"
+  echo "           Optional: VERTEXAI_PROJECT / VERTEXAI_LOCATION (defaults: itpc-gcp-octo-eng-claude / global)."
 fi
 PYTHONPATH="$PROJECT/adapters" "$VENV/bin/cap-evolve" check "$PROJECT" || die "cap-evolve check did not pass"
 

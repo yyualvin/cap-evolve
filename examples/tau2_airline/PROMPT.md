@@ -2,9 +2,10 @@
 
 Paste this to your coding agent (Claude Code) at the cap-evolve repo root and say
 **"follow RUN.md."** Intake treats this as a brand-new benchmark: the integration
-step **clones + installs tau2-bench**, wires RITS, writes the adapter, runs the
-`cap-evolve check` gate, then the full optimize → gate → sealed-test → report loop
-with a live dashboard. Everything below is the input intake needs.
+step **clones + installs tau2-bench**, wires Vertex Claude (litellm `vertex_ai/`),
+writes the adapter, runs the `cap-evolve check` gate, then the full optimize →
+gate → sealed-test → report loop with a live dashboard. Everything below is the
+input intake needs.
 
 ```text
 Follow RUN.md to run a cap-evolve optimization. Onboard this as a brand-new
@@ -45,10 +46,15 @@ exists). Here is everything intake needs:
                 instead of looping run_batch per trial; per-trial persistence
                 (rollouts/<split>/<task>__<tag>__t<k>.json) is UNCHANGED so pass^k / SE / resume
                 keep working. This collapses N sequential eval passes into one batched run.
-- agent AND user simulator:  openai/gpt-oss-120b  via IBM RITS
-- RITS wiring:  litellm model "hosted_vllm/openai/gpt-oss-120b" + per-call api_base +
-                extra_headers {"RITS_API_KEY": ...}  (NO litellm monkeypatch, NO tau2 fork)
-- credentials:  RITS_API_KEY (+ RITS_API_URL) in the repo-root .env
+- agent AND user simulator:  claude-sonnet-4-5@20250929 via Vertex AI (default)
+- Vertex wiring: litellm model "vertex_ai/claude-sonnet-4-5@20250929" + llm_args
+                vertex_project / vertex_location (NO litellm monkeypatch, NO tau2 fork,
+                NO AnthropicVertex SDK — tau2 calls litellm.completion)
+- credentials:  GCP ADC (gcloud auth application-default login or
+                GOOGLE_APPLICATION_CREDENTIALS); defaults project
+                itpc-gcp-octo-eng-claude, location global (override VERTEXAI_PROJECT /
+                VERTEXAI_LOCATION). RITS (hosted_vllm/...) and IBM Anthropic gateway
+                (anthropic/...) remain available via TAU2_AGENT_MODEL / TAU2_USER_MODEL.
 - concurrency:  TAU2_MAX_CONCURRENCY=125
 
 # 4. SCORER  (what to optimize against) — and WHERE the metric comes from
@@ -182,8 +188,8 @@ exists). Here is everything intake needs:
 ```
 
 > The bundled `examples/tau2_airline/` is the **result** of following this prompt:
-> the adapter (`adapters/adapter.py`), the RITS shim (`adapters/rits.py`), the seed
-> capability (`seed_capability/`), and the optimizer instructions
+> the adapter (`adapters/adapter.py`), the provider shim (`adapters/rits.py`; default
+> Vertex Claude), the seed capability (`seed_capability/`), and the optimizer instructions
 > (`.capevolve/project/optimizer/INSTRUCTIONS.md`) are what the intake/implement-and-check
 > flow produced — including `adapter.trajectories()` (native tau2 traces) and `score()`
 > (reads `reward_info`). `setup.sh` is the executable transcript of that onboarding

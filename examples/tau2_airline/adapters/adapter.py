@@ -1,10 +1,11 @@
-"""Project adapter — optimize tau2-bench AIRLINE (system-prompt POLICY + TOOLS) via IBM RITS.
+"""Project adapter — optimize tau2-bench AIRLINE (system-prompt POLICY + TOOLS).
 
 Wires cap-evolve to the tau2 airline domain:
 
   * ``tasks``      -> all 50 airline tasks (stable, non-empty for every split).
-  * ``run_batch``  -> tau2's own batch runner (``run_tasks``) with a RITS-backed
-                      ``TextRunConfig``; maps each ``SimulationRun`` to a ``Rollout``.
+  * ``run_batch``  -> tau2's own batch runner (``run_tasks``) with a provider-shim
+                      ``TextRunConfig`` (``rits.py``; default Vertex Claude);
+                      maps each ``SimulationRun`` to a ``Rollout``.
   * ``run_target`` -> thin wrapper over ``run_batch`` for one task.
   * ``score``      -> tau2's own reward in [0,1] (deterministic given a rollout);
                       gold-AWARE but gold-SAFE, ARGUMENT-LEVEL feedback: for each
@@ -16,7 +17,8 @@ Wires cap-evolve to the tau2 airline domain:
                       always resets to a pristine snapshot before applying.
 
 ``cap-evolve check`` does NO live LLM call: ``tasks``/``score``/``materialize`` are
-network-free, and RITS endpoint resolution is lazy (only on a real ``run_batch``).
+network-free, and provider resolution in ``rits.py`` is lazy (only on a real
+``run_batch``).
 """
 
 from __future__ import annotations
@@ -154,9 +156,10 @@ class Adapter(CapabilityAdapter):
     def run_batch(self, tasks: list[Task], ctx, *, seed: int = 0) -> dict:
         """Run a batch of airline tasks through tau2's own batch runner.
 
-        Builds a RITS-backed ``TextRunConfig`` and calls ``run_tasks`` with
-        ``num_trials=1`` (cap-evolve owns trials) and ``seed=int(seed)`` so each
-        cap-evolve trial is an independent draw. Returns ``{task_id: Rollout}``.
+        Builds a provider-shim ``TextRunConfig`` (``rits.py``; default Vertex Claude)
+        and calls ``run_tasks`` with ``num_trials=1`` (cap-evolve owns trials) and
+        ``seed=int(seed)`` so each cap-evolve trial is an independent draw.
+        Returns ``{task_id: Rollout}``.
         """
         import os
 

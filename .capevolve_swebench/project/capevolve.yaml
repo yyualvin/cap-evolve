@@ -1,0 +1,33 @@
+# SWE-bench Lite POC — optimize a coding-agent skill-package
+capabilities: [skill-package]
+capability_path: seed_capability
+actions: [edit]
+capability_sources: []
+
+optimizer_skill: claude-code
+optimizer_model: claude-sonnet-4-6
+optimizer_max_turns: 50
+optimizer_usd_per_iter: 5.0
+
+algorithm_skill: hill-climb
+algorithm_focus: all
+
+dataset_source: adapter
+split_seed: 0
+split_train: 0.5
+split_val: 0.25
+split_test: 0.25
+split_ids_file: swebench_split.json
+
+num_trials: 1
+
+gate_mode: paired
+gate_k_se: 0.2
+
+max_iterations: 2
+stall: 0
+max_metric_calls: 0
+max_usd: 50.0
+max_optimizer_usd: 20.0
+
+store: git

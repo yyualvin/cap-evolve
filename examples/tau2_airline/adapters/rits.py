@@ -1,15 +1,19 @@
-"""RITS (IBM Research Inference) wiring for tau2 via litellm config.
+"""LLM provider shim for tau2 via litellm config (no monkeypatch, no tau2 fork).
 
-We do NOT monkeypatch litellm or fork tau2. tau2 calls
-``litellm.completion(model=..., messages=..., tools=..., **llm_args)`` with
-``litellm.drop_params=True``, so RITS is passed entirely through the run config:
-the model string ``hosted_vllm/openai/gpt-oss-120b`` plus an ``llm_args`` dict
-carrying ``api_base``, ``api_key`` and an ``extra_headers`` with ``RITS_API_KEY``.
+Default: Vertex AI Claude (``vertex_ai/claude-sonnet-4-5@20250929``) with ADC auth
+and ``vertex_project`` / ``vertex_location`` in ``llm_args``.
 
-Endpoint resolution is LAZY and cached — it never runs at import time and never
-during ``cap-evolve check`` (which does no live LLM call). The first time
-``llm_args()`` is invoked the inference-info endpoint is queried (with retry) to
-map the model to its RITS endpoint, then cached for the process.
+Overrides (``TAU2_AGENT_MODEL`` / ``TAU2_USER_MODEL``):
+
+  * ``vertex_ai/...``  → Vertex (ADC + project/location)
+  * ``anthropic/...``  → IBM Anthropic-compatible gateway (ANTHROPIC_BASE_URL + token)
+  * ``hosted_vllm/...`` (or anything else) → IBM RITS (RITS_API_KEY + lazy endpoint lookup)
+
+tau2 calls ``litellm.completion(model=..., messages=..., tools=..., **llm_args)``
+with ``litellm.drop_params=True``, so every provider is entirely run-config driven.
+
+All network / credential resolution is LAZY — never at import time and never during
+``cap-evolve check`` (which does no live LLM call).
 """
 
 from __future__ import annotations
@@ -19,14 +23,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# litellm model string for the agent + user simulator.
-LITELLM_MODEL = "hosted_vllm/openai/gpt-oss-120b"
-# RITS model_name key returned by the inference-info endpoint.
-_RITS_MODEL_NAME = "openai/gpt-oss-120b"
+# Default: Vertex AI Claude for agent + user simulator.
+LITELLM_MODEL = "vertex_ai/claude-sonnet-4-5@20250929"
+_DEFAULT_VERTEX_PROJECT = "itpc-gcp-octo-eng-claude"
+_DEFAULT_VERTEX_LOCATION = "global"
 
-# Base inference host (the api_base is built per-model from the endpoint slug).
+# RITS override path (when TAU2_*_MODEL is hosted_vllm/... or similar).
+_RITS_MODEL_NAME = "openai/gpt-oss-120b"
+_RITS_LITELLM_MODEL = "hosted_vllm/openai/gpt-oss-120b"
 _API_URL = "https://inference-3scale-apicast-production.apps.rits.fmaas.res.ibm.com"
-# Where to look up {model_name -> endpoint}.
 _INFO_URL = "https://rits.fmaas.res.ibm.com/ritsapi/inferenceinfo"
 
 _api_base_cache: Optional[str] = None
@@ -58,7 +63,8 @@ def _get_api_key() -> str:
     key = os.environ.get("RITS_API_KEY")
     if not key:
         raise RuntimeError(
-            "RITS_API_KEY not set. Put it in the repo-root .env (RITS_API_KEY=...)."
+            "RITS_API_KEY not set. Put it in the repo-root .env (RITS_API_KEY=...) "
+            "when using a RITS / hosted_vllm model override."
         )
     return key
 
@@ -103,7 +109,7 @@ _registered_cost = False
 
 
 def _register_zero_cost() -> None:
-    """Tell litellm this RITS model is free (internal inference), so its cost
+    """Tell litellm the RITS model is free (internal inference), so its cost
     lookup returns 0 instead of logging a noisy 'model isn't mapped yet' ERROR
     on every call. Honest: RITS runner spend is not metered here. Lazy + once."""
     global _registered_cost
@@ -118,7 +124,9 @@ def _register_zero_cost() -> None:
             "litellm_provider": "hosted_vllm",
             "mode": "chat",
         }
-        litellm.register_model({LITELLM_MODEL: dict(zero), _RITS_MODEL_NAME: dict(zero)})
+        litellm.register_model(
+            {_RITS_LITELLM_MODEL: dict(zero), _RITS_MODEL_NAME: dict(zero)}
+        )
         _registered_cost = True
     except Exception:  # noqa: BLE001 — cost mapping is cosmetic; never block a run
         pass
@@ -138,26 +146,51 @@ def llm_args() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Provider-aware model selection (default = RITS gpt-oss; override for claude).
+# Provider-aware model selection (default = Vertex Claude; overrides below).
 # ---------------------------------------------------------------------------
-# The agent and user-simulator models are env-overridable so the same adapter can
-# run on RITS gpt-oss (default) OR on a claude model via the IBM Anthropic-compatible
-# gateway (e.g. the on-demand integration test: TAU2_AGENT_MODEL=anthropic/claude-haiku-4-5).
 
 
-def _is_anthropic(model: str) -> bool:
-    m = (model or "").lower()
-    return m.startswith("anthropic/") or "claude" in m
+def _is_vertex(model: str) -> bool:
+    return (model or "").lower().startswith("vertex_ai/")
+
+
+def _is_anthropic_gateway(model: str) -> bool:
+    """IBM Anthropic-compatible gateway only — not Vertex Claude (see _is_vertex)."""
+    return (model or "").lower().startswith("anthropic/")
 
 
 def agent_model() -> str:
-    """litellm model string for the agent under test (default: RITS gpt-oss)."""
+    """litellm model string for the agent under test (default: Vertex Claude)."""
     return os.environ.get("TAU2_AGENT_MODEL") or LITELLM_MODEL
 
 
 def user_model() -> str:
-    """litellm model string for the user simulator (default: RITS gpt-oss)."""
+    """litellm model string for the user simulator (default: Vertex Claude)."""
     return os.environ.get("TAU2_USER_MODEL") or LITELLM_MODEL
+
+
+def _vertex_args() -> dict:
+    """litellm args for Claude on Vertex AI (ADC auth).
+
+    Project/location from VERTEXAI_PROJECT / VERTEXAI_LOCATION (or VERTEX_PROJECT /
+    VERTEX_LOCATION), falling back to the example defaults. LAZY: never at import.
+    """
+    _load_env()
+    project = (
+        os.environ.get("VERTEXAI_PROJECT")
+        or os.environ.get("VERTEX_PROJECT")
+        or _DEFAULT_VERTEX_PROJECT
+    )
+    location = (
+        os.environ.get("VERTEXAI_LOCATION")
+        or os.environ.get("VERTEX_LOCATION")
+        or _DEFAULT_VERTEX_LOCATION
+    )
+    return {
+        "vertex_project": project,
+        "vertex_location": location,
+        "temperature": 0.0,
+    }
 
 
 def _gateway_args() -> dict:
@@ -186,7 +219,9 @@ def _gateway_args() -> dict:
 
 
 def llm_args_for(model: str) -> dict:
-    """Per-model litellm args: claude models -> IBM gateway; anything else -> RITS."""
-    if _is_anthropic(model):
+    """Per-model litellm args: Vertex → gateway → RITS (in that order)."""
+    if _is_vertex(model):
+        return _vertex_args()
+    if _is_anthropic_gateway(model):
         return _gateway_args()
     return llm_args()

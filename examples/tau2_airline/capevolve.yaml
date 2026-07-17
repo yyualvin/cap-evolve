@@ -32,7 +32,7 @@ split_test: 0.25
 split_ids_file: split_ids.json
 
 # --- scoring ----------------------------------------------------------------
-num_trials: 10              # gpt-oss is stochastic; 10 trials → mean+stderr + pass^k
+num_trials: 10              # stochastic agent/user; 10 trials → mean+stderr + pass^k
 
 # --- acceptance gate --------------------------------------------------------
 gate_mode: paired                        # paired (recommended) | significant | strict | threshold | simplicity_tiebreak

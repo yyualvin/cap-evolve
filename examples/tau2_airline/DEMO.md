@@ -53,9 +53,11 @@ the "what did we get" view.
    the **actual git diff** for that step. This is the money shot: the optimizer is
    writing **code into the tool bodies**, not just editing prose (see Scene 2).
 4. **Cost / intake panel** — per-iteration optimizer + runner cost & time, plus the
-   one-time intake cost. Honest note: **RITS is internal/free**, so runner `$` is
-   `$0`; the budget governs the Claude optimizer (~\$148 optimizer spend over the run,
-   per-iteration capped at `--max-budget-usd 40`).
+   one-time intake cost. Note: the **committed** `run_full/` dashboard was produced
+   with internal RITS (runner `$0`); the example **default** is now Vertex Claude, so
+   a fresh run meters runner spend on Vertex. The budget still governs the Claude
+   optimizer (~\$148 optimizer spend over that historical run, per-iteration capped at
+   `--max-budget-usd 40`).
 5. **Memory** — the cross-iteration `JOURNAL.md`: each iteration's intent plus the
    framework's objective **RESULT** line (what the gate accepted/rejected, and the
    exact tasks it broke/fixed) — the optimizer's institutional memory (see Scene 3).
@@ -141,8 +143,9 @@ Tie it together (mirrors the asciinema cast and `docs/REPRODUCE_tau2.md`):
 1. **Intake builds the integration.** From one prompt, intake clones + `pip install -e`
    tau2-bench (recording the commit), scaffolds `.capevolve/project`, and wires the
    adapter (`run_batch` → tau2's runner, batched `run_trials` fast path,
-   `trajectories()` = native tau2 traces, `score()` reads `reward_info`), the RITS
-   shim, and the editable seed capability (`policy/` + `tools/`).
+   `trajectories()` = native tau2 traces, `score()` reads `reward_info`), the provider
+   shim (`rits.py`; default Vertex Claude), and the editable seed capability
+   (`policy/` + `tools/`).
 2. **Hard gate.** `cap-evolve check` must return `{"ok": true}` — verifies the
    adapter contract and that `score()` is deterministic — **before any \$ is spent**.
 3. **Baseline.** Score the unmodified seed on val → **0.536**.
@@ -162,11 +165,13 @@ Tie it together (mirrors the asciinema cast and `docs/REPRODUCE_tau2.md`):
 ## The two commands a viewer runs
 
 ```bash
-# 0. clone the repo; put RITS creds in repo-root .env (RITS_API_KEY, RITS_API_URL);
+# 0. clone the repo; authenticate to GCP for Vertex Claude (ADC):
+#      gcloud auth application-default login
+#    optional: VERTEXAI_PROJECT / VERTEXAI_LOCATION (defaults: itpc-gcp-octo-eng-claude / global);
 #    be logged into Claude Code (or export ANTHROPIC_API_KEY) for the optimizer.
 
 bash examples/tau2_airline/setup.sh    # intake onboarding: install cap-evolve, clone/install
-                                       # tau2-bench, scaffold + wire adapter/RITS/seed, then
+                                       # tau2-bench, scaffold + wire adapter/provider/seed, then
                                        # cap-evolve check (the hard gate)
 bash examples/tau2_airline/run.sh      # full run: 50 tasks · 10 trials · live dashboard
 ```
@@ -187,9 +192,12 @@ agg examples/tau2_airline/run_full/demo.cast demo.gif      # render to GIF for t
 - **No-holdout** (train = val = test = all 50): val **is** the fit metric and the
   sealed-test number is reported as a fit metric (the engine logs a
   `splits_warning`). For a held-out result, pin a 30/10/10 split via `split_ids.json`.
-- **RITS is internal/free** → runner `$` is honestly `$0`; the budget governs the
-  Claude optimizer, and the per-iteration cap is enforced by the Claude CLI itself
-  (`--max-budget-usd`).
+- **Vertex Claude is the example default** (ADC + `vertex_ai/claude-sonnet-4-5@20250929`);
+  runner `$` on a fresh run is Vertex spend. The committed `run_full/` used internal
+  RITS (runner `$0`). The budget governs the Claude optimizer, and the per-iteration
+  cap is enforced by the Claude CLI itself (`--max-budget-usd`).
+  Override with `TAU2_AGENT_MODEL` / `TAU2_USER_MODEL` (RITS `hosted_vllm/...` or IBM
+  gateway `anthropic/...`).
 - The gate **correctly refuses** gains it can't distinguish from noise on a small
   val — that is the system working, not failing. 5 of the 10 iterations were rejected,
   and each rejection became a recorded lesson the next iteration built on.

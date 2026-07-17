@@ -3,7 +3,11 @@
 # optimization run used as an on-demand regression check for the pipeline. Cheap:
 # 1 task, 1 trial, 1 iteration.
 #
+# Intentional OVERRIDE of the example default (Vertex Claude): this itest forces
+# a cheaper IBM Anthropic-compatible gateway model so CI stays cheap.
+#
 #   - agent + user simulator : claude-haiku-4-5 via the IBM Anthropic-compatible gateway
+#                              (overrides Vertex default via TAU2_AGENT_MODEL / TAU2_USER_MODEL)
 #   - optimizer              : claude-code @ claude-sonnet-4-6
 #   - seed                   : the existing airline policy + tools
 #   - credentials            : ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN
@@ -20,7 +24,7 @@ PROJECT="$REPO/.capevolve/project"
 say(){ printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 die(){ printf '\n\033[1;31mITEST FAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 
-# Run the agent + user simulator on claude via the gateway (default for this test).
+# Cheap gateway override (example default is Vertex Claude — see adapters/rits.py).
 export TAU2_AGENT_MODEL="${TAU2_AGENT_MODEL:-anthropic/claude-haiku-4-5}"
 export TAU2_USER_MODEL="${TAU2_USER_MODEL:-anthropic/claude-haiku-4-5}"
 
