@@ -15,8 +15,8 @@ capability_sources: [seed_capability/reference/data_model.py]
 # --- who proposes edits -----------------------------------------------------
 optimizer_skill: claude-code             # optimizer NAME (resolved by run-optimizer via optimizers/registry.yaml)
 optimizer_model: claude-opus-4-6         # the optimizer's Claude model id
-optimizer_max_turns: 400                 # generous per-iteration turn cap; the real ceiling is the $ cap below
-optimizer_usd_per_iter: 40.0             # per-iteration $ cap, enforced by claude (--max-budget-usd N)
+optimizer_max_turns: 50                 # generous per-iteration turn cap; the real ceiling is the $ cap below
+optimizer_usd_per_iter: 5.0             # per-iteration $ cap, enforced by claude (--max-budget-usd N)
 
 # --- how to iterate ---------------------------------------------------------
 algorithm_skill: hill-climb              # algorithms/<skill>
@@ -25,14 +25,15 @@ algorithm_focus: all                     # hill-climb schedule: all | cyclic | h
 # --- data + splits ----------------------------------------------------------
 dataset_source: adapter                  # use the adapter's tasks()
 split_seed: 0
-split_train: 0.5
-split_val: 0.25
-split_test: 0.25
-# Pin the split explicitly: no-holdout fit (train==val==test==all 50 ids).
+split_train: 0.6
+split_val: 0.2
+split_test: 0.2
+# Pin the split explicitly: held-out 30/10/10 (disjoint train/val/test; seed 0).
+# Val gates optimization; test is sealed and scored once by finalize.
 split_ids_file: split_ids.json
 
 # --- scoring ----------------------------------------------------------------
-num_trials: 10              # stochastic agent/user; 10 trials → mean+stderr + pass^k
+num_trials: 5             # stochastic agent/user; 10 trials → mean+stderr + pass^k
 
 # --- acceptance gate --------------------------------------------------------
 gate_mode: paired                        # paired (recommended) | significant | strict | threshold | simplicity_tiebreak
@@ -47,8 +48,8 @@ gate_k_se: 0.2                           # accept gains that clear a 0.2·SE bar
 max_iterations: 10          # optimizer iterations (dominant cost knob)
 stall: 0                    # run all max_iterations (do not early-stop on rejects)
 max_metric_calls: 0         # 0 = unlimited; else stop after N runner evals
-max_usd: 400.0              # total $ cap (runner + optimizer + intake)
-max_optimizer_usd: 400.0    # cumulative optimizer-only $ cap (per-iteration cap is optimizer_usd_per_iter=40)
+max_usd: 50.0              # total $ cap (runner + optimizer + intake)
+max_optimizer_usd: 20.0    # cumulative optimizer-only $ cap (per-iteration cap is optimizer_usd_per_iter=40)
 
 # --- iteration store (how each iteration is versioned for an inspectable process)
 store: git                               # git (default) | copy | command

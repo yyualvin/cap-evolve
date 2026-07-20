@@ -251,9 +251,23 @@ class Adapter(CapabilityAdapter):
         agent_cost = sim.agent_cost or 0.0
         user_cost = sim.user_cost or 0.0
         term = sim.termination_reason
+        # tau2 stashes the underlying exception on INFRASTRUCTURE_ERROR sims in
+        # sim.info ({error, error_type, error_traceback, ...}). Surface it so
+        # rollouts/feedback show the real cause (missing SDK, ADC, 429, ...) —
+        # not just the TerminationReason enum.
+        info = getattr(sim, "info", None) or {}
+        if not isinstance(info, dict):
+            try:
+                info = dict(info)
+            except Exception:
+                info = {}
+        underlying = info.get("error") if isinstance(info, dict) else None
         error = None
         if term in infra_reasons:
-            error = f"tau2 terminated for infrastructure reason: {term}"
+            error = (
+                f"tau2 terminated for infrastructure reason: {term}"
+                + (f" — {underlying}" if underlying else "")
+            )
 
         try:
             messages = [m.model_dump() for m in sim.get_messages()]
@@ -264,6 +278,17 @@ class Adapter(CapabilityAdapter):
             reward_info.model_dump(mode="json") if reward_info is not None else None
         )
 
+        meta = {
+            "domain": DOMAIN,
+            "tau2_reward": reward,
+            "tau2_reward_info": reward_info_dump,
+            "termination_reason": str(term),
+        }
+        if underlying:
+            meta["infra_error"] = underlying
+            if info.get("error_type"):
+                meta["infra_error_type"] = info["error_type"]
+
         return Rollout(
             task_id=task_id,
             output=messages,
@@ -271,12 +296,7 @@ class Adapter(CapabilityAdapter):
             cost_usd=float(agent_cost) + float(user_cost),
             tokens=0,
             error=error,
-            metadata={
-                "domain": DOMAIN,
-                "tau2_reward": reward,
-                "tau2_reward_info": reward_info_dump,
-                "termination_reason": str(term),
-            },
+            metadata=meta,
         )
 
     def run_trials(
