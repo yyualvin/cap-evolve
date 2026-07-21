@@ -1,4 +1,4 @@
-"""Project adapter — optimize tau2-bench AIRLINE (system-prompt POLICY + TOOLS).
+"""Project adapter — optimize tau2-bench AIRLINE (policy / skill-package + TOOLS).
 
 Wires cap-evolve to the tau2 airline domain:
 
@@ -15,6 +15,8 @@ Wires cap-evolve to the tau2 airline domain:
   * ``apply``      -> makes a candidate LIVE by overriding the registry's airline
                       env constructor (candidate policy + candidate tools). Idempotent;
                       always resets to a pristine snapshot before applying.
+                      Policy text prefers ``SKILL.md`` (skill-package), then
+                      ``policy/policy.md``, then tau2's canonical policy.
 
 ``cap-evolve check`` does NO live LLM call: ``tasks``/``score``/``materialize`` are
 network-free, and provider resolution in ``rits.py`` is lazy (only on a real
@@ -24,6 +26,7 @@ network-free, and provider resolution in ``rits.py`` is lazy (only on a real
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -104,8 +107,38 @@ def _build_candidate_tools(candidate_dir: Path):
     return CandidateTools(db)
 
 
+_SKILL_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.S)
+
+
+def _skill_md_to_policy(text: str) -> str:
+    """Strip Agent Skill YAML frontmatter; tau2 wants a flat policy string."""
+    m = _SKILL_FRONTMATTER_RE.match(text)
+    return (text[m.end():] if m else text).lstrip()
+
+
 def _read_candidate_policy(candidate_dir: Path) -> str:
-    """Read the candidate policy text; fall back to tau2's canonical policy."""
+    """Read candidate policy text for the tau2 Environment.
+
+    Preference order:
+      1. ``SKILL.md`` (+ optional ``references/*.md``) — skill-package seed
+      2. ``policy/policy.md`` — legacy system-prompt seed
+      3. tau2's canonical airline policy
+    """
+    skill_md = candidate_dir / "SKILL.md"
+    if skill_md.exists():
+        body = _skill_md_to_policy(skill_md.read_text(encoding="utf-8"))
+        refs_dir = candidate_dir / "references"
+        if refs_dir.is_dir():
+            chunks = [
+                f.read_text(encoding="utf-8").strip()
+                for f in sorted(refs_dir.glob("*.md"))
+                if f.is_file()
+            ]
+            chunks = [c for c in chunks if c]
+            if chunks:
+                body = body.rstrip() + "\n\n" + "\n\n".join(chunks)
+        return body
+
     policy_path = candidate_dir / "policy" / "policy.md"
     if policy_path.exists():
         return policy_path.read_text(encoding="utf-8")
