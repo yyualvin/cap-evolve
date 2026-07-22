@@ -1,6 +1,6 @@
 """LLM provider shim for tau2 via litellm config (no monkeypatch, no tau2 fork).
 
-Default: Vertex AI Claude (``vertex_ai/claude-sonnet-4-5@20250929``) with ADC auth
+Default: Vertex AI Claude (``vertex_ai/claude-sonnet-4-6``) with ADC auth
 and ``vertex_project`` / ``vertex_location`` in ``llm_args``.
 
 Overrides (``TAU2_AGENT_MODEL`` / ``TAU2_USER_MODEL``):
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Optional
 
 # Default: Vertex AI Claude for agent + user simulator.
-LITELLM_MODEL = "vertex_ai/claude-sonnet-4-5@20250929"
+LITELLM_MODEL = "vertex_ai/claude-sonnet-4-6"
 _DEFAULT_VERTEX_PROJECT = "itpc-gcp-octo-eng-claude"
 _DEFAULT_VERTEX_LOCATION = "global"
 

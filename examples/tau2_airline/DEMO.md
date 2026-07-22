@@ -192,7 +192,7 @@ agg examples/tau2_airline/run_full/demo.cast demo.gif      # render to GIF for t
 - **No-holdout** (train = val = test = all 50): val **is** the fit metric and the
   sealed-test number is reported as a fit metric (the engine logs a
   `splits_warning`). For a held-out result, pin a 30/10/10 split via `split_ids.json`.
-- **Vertex Claude is the example default** (ADC + `vertex_ai/claude-sonnet-4-5@20250929`);
+- **Vertex Claude is the example default** (ADC + `vertex_ai/claude-sonnet-4-6`);
   runner `$` on a fresh run is Vertex spend. The committed `run_full/` used internal
   RITS (runner `$0`). The budget governs the Claude optimizer, and the per-iteration
   cap is enforced by the Claude CLI itself (`--max-budget-usd`).

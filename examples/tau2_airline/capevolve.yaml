@@ -4,7 +4,7 @@
 # Kept flat (no inline maps) so the zero-dependency reader can parse it.
 
 # --- what to optimize -------------------------------------------------------
-capabilities: [system-prompt, tools, skill-package]  # policy + tools + Agent Skill package (SKILL.md)
+capabilities: [skill-package, tools]     # Agent Skill (SKILL.md) + tools; SKILL.md is the live policy
 capability_path: seed_capability         # the artifact dir (a copy is optimized)
 actions: [edit]                          # allowed edits (capability-specific)
 # Extra source files the tools import (tau2's airline data model / types), copied

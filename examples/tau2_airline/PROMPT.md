@@ -13,10 +13,10 @@ benchmark — the intake/integration step should CLONE + INSTALL it (not assume 
 exists). Here is everything intake needs:
 
 # 1. CAPABILITY TO OPTIMIZE  (a copy is edited each iteration; the original is never touched)
-- type:         [system-prompt, tools]      # the airline POLICY and the TOOLS, jointly
+- type:         [skill-package, tools]      # Agent Skill (SKILL.md = live policy) + TOOLS, jointly
 - tools means:  edit tool docstrings/descriptions; edit tool behavior/code; and
                 ADD/REMOVE tools, including composite tools that call existing tools
-- seed:         tau2-bench's canonical airline policy + its airline tool set
+- seed:         a minimal airline Agent Skill (SKILL.md) + tau2's airline tool set
 - seed tools:   the seed tools file must be CLEAN, runnable code as intake would
                 produce it — real tool bodies, no baked-in optimizer/editing
                 instructions in its docstrings (what the optimizer may change to the
@@ -46,8 +46,8 @@ exists). Here is everything intake needs:
                 instead of looping run_batch per trial; per-trial persistence
                 (rollouts/<split>/<task>__<tag>__t<k>.json) is UNCHANGED so pass^k / SE / resume
                 keep working. This collapses N sequential eval passes into one batched run.
-- agent AND user simulator:  claude-sonnet-4-5@20250929 via Vertex AI (default)
-- Vertex wiring: litellm model "vertex_ai/claude-sonnet-4-5@20250929" + llm_args
+- agent AND user simulator:  claude-sonnet-4-6 via Vertex AI (default)
+- Vertex wiring: litellm model "vertex_ai/claude-sonnet-4-6" + llm_args
                 vertex_project / vertex_location (NO litellm monkeypatch, NO tau2 fork,
                 NO AnthropicVertex SDK — tau2 calls litellm.completion)
 - credentials:  GCP ADC (gcloud auth application-default login or
@@ -149,16 +149,17 @@ exists). Here is everything intake needs:
                 require MULTIPLE edit classes per iteration and ADD at least one NEW code-bearing tool
                 (composite atomic-WRITE / loop / validation) whenever a CAPABILITY-GAP or action-STALL
                 cluster is present — adding new tools is ENCOURAGED, not an exception.
-- scope to the SELECTED capabilities: BOTH system-prompt and tools are selected here, so the
+- scope to the SELECTED capabilities: BOTH skill-package and tools are selected here, so the
                 instructions reference BOTH skills and the optimizer may edit EITHER. (Generic rule: if
                 only ONE capability were selected, the instructions, the guidance, and the editable
-                files must cover ONLY that one — e.g. tools-only ⇒ no prompt-editing guidance, no
-                system-prompt skill, the prompt is not presented as editable.)
-- EDIT BOTH the prompt AND the tools — they are EQUALLY fair game; pick whatever fixes the clusters:
-    * PROMPT (system-prompt), per ./guidance/system-prompt/SKILL.md: rewrite/clarify a rule, add the
-      WHY, consolidate redundant rules, add a missing rule grounded in the trajectories, add an
-      example, tighten the output contract. NEVER drop a needed rule (change/consolidate/add, don't
-      delete). The prompt is HIGH-VALUE — not a last resort.
+                files must cover ONLY that one — e.g. tools-only ⇒ no skill-package guidance, no
+                SKILL.md presented as editable.)
+- EDIT BOTH the skill package AND the tools — they are EQUALLY fair game; pick whatever fixes the clusters:
+    * SKILL PACKAGE, per ./guidance/skill-package/SKILL.md: edit SKILL.md (frontmatter + body),
+      references/, and bundled scripts under skill-creator rules (valid frontmatter, progressive
+      disclosure, concise body). Recover missing domain rules into the skill or references; do not
+      bloat the body — factor detail into references/. The skill body is flattened into tau2's
+      policy= string at eval time.
     * TOOLS, per ./guidance/tools/SKILL.md: prefer CODE-BEARING changes — a validation tool that
       enforces a rule in code then calls the existing tool and removes the raw one; a workflow/loop
       tool that collapses a recurring sequence; a composite WRITE tool that performs a stalled
