@@ -4,13 +4,10 @@
 # Kept flat (no inline maps) so the zero-dependency reader can parse it.
 
 # --- what to optimize -------------------------------------------------------
-capabilities: [system-prompt, tools, skill-package]  # policy + tools + Agent Skill package (SKILL.md)
+capabilities: [skill-package]            # optimize SKILL.md only; tools/tools.py is frozen at seed
 capability_path: seed_capability         # the artifact dir (a copy is optimized)
 actions: [edit]                          # allowed edits (capability-specific)
-# Extra source files the tools import (tau2's airline data model / types), copied
-# verbatim into the optimizer workdir (guidance/sources/) so it can write correct
-# new-tool code against the real types. Resolved relative to this project dir.
-capability_sources: [seed_capability/reference/data_model.py]
+capability_sources: []                   # no tool-code sources needed (tools not in edit set)
 
 # --- who proposes edits -----------------------------------------------------
 optimizer_skill: claude-code             # optimizer NAME (resolved by run-optimizer via optimizers/registry.yaml)
@@ -33,7 +30,7 @@ split_test: 0.2
 split_ids_file: split_ids.json
 
 # --- scoring ----------------------------------------------------------------
-num_trials: 5             # stochastic agent/user; 10 trials → mean+stderr + pass^k
+num_trials: 5             # stochastic agent/user; mean+stderr + pass^k per task
 
 # --- acceptance gate --------------------------------------------------------
 gate_mode: paired                        # paired (recommended) | significant | strict | threshold | simplicity_tiebreak

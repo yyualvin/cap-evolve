@@ -54,6 +54,7 @@ mkdir -p "$PROJECT/adapters"
 cp "$EX_DIR/adapters/adapter.py" "$EX_DIR/adapters/rits.py" "$PROJECT/adapters/"
 rm -rf "$PROJECT/seed_capability"; cp -R "$EX_DIR/seed_capability" "$PROJECT/seed_capability"
 cp "$EX_DIR/capevolve.itest.yaml" "$EX_DIR/itest_split.json" "$PROJECT/"
+mkdir -p "$PROJECT/optimizer"; cp "$EX_DIR/optimizer/INSTRUCTIONS.md" "$PROJECT/optimizer/"
 PYTHONPATH="$PROJECT/adapters" "$VENV/bin/cap-evolve" check "$PROJECT" || die "cap-evolve check did not pass"
 
 say "4/4  Run the optimization (task 9 · 1 trial · 1 iter) + assert regression"

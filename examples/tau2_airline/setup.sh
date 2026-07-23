@@ -116,6 +116,7 @@ cp "$EX_DIR/adapters/adapter.py" "$EX_DIR/adapters/rits.py" "$PROJECT/adapters/"
 rm -rf "$PROJECT/seed_capability"; cp -R "$EX_DIR/seed_capability" "$PROJECT/seed_capability"
 cp "$EX_DIR/capevolve.yaml" "$EX_DIR/capevolve.smoke.yaml" \
    "$EX_DIR/split_ids.json" "$EX_DIR/smoke_split.json" "$PROJECT/"
+mkdir -p "$PROJECT/optimizer"; cp "$EX_DIR/optimizer/INSTRUCTIONS.md" "$PROJECT/optimizer/"
 echo "  project scaffolded + integration wired at $PROJECT"
 
 say "3/3  Hard gate — cap-evolve check (credentials + adapter contract)"
