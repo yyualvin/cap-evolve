@@ -1,15 +1,16 @@
-"""RITS (IBM Research Inference) wiring for tau2 via litellm config.
+"""Model wiring for tau2 — supports RITS, Vertex AI, and the IBM Anthropic gateway.
 
-We do NOT monkeypatch litellm or fork tau2. tau2 calls
-``litellm.completion(model=..., messages=..., tools=..., **llm_args)`` with
-``litellm.drop_params=True``, so RITS is passed entirely through the run config:
-the model string ``hosted_vllm/openai/gpt-oss-120b`` plus an ``llm_args`` dict
-carrying ``api_base``, ``api_key`` and an ``extra_headers`` with ``RITS_API_KEY``.
+tau2 calls ``litellm.completion(model=..., messages=..., tools=..., **llm_args)``
+with ``litellm.drop_params=True``, so each provider is passed entirely through the
+run config: a litellm model string plus an ``llm_args`` dict.
 
-Endpoint resolution is LAZY and cached — it never runs at import time and never
-during ``cap-evolve check`` (which does no live LLM call). The first time
-``llm_args()`` is invoked the inference-info endpoint is queried (with retry) to
-map the model to its RITS endpoint, then cached for the process.
+Provider is selected by the TAU2_AGENT_MODEL env var prefix:
+  vertex_ai/...   -> Vertex AI (ADC auth, no key needed)
+  anthropic/...   -> IBM Anthropic-compatible gateway
+  (default)       -> RITS (hosted_vllm/openai/gpt-oss-120b)
+
+All resolution is LAZY — no work at import time, so ``cap-evolve check`` stays
+offline.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# litellm model string for the agent + user simulator.
+# litellm model string for the agent + user simulator (RITS default).
 LITELLM_MODEL = "hosted_vllm/openai/gpt-oss-120b"
 # RITS model_name key returned by the inference-info endpoint.
 _RITS_MODEL_NAME = "openai/gpt-oss-120b"
@@ -51,6 +52,11 @@ def _load_env() -> None:
             except Exception:
                 pass
             break
+
+
+# ---------------------------------------------------------------------------
+# RITS provider
+# ---------------------------------------------------------------------------
 
 
 def _get_api_key() -> str:
@@ -124,7 +130,7 @@ def _register_zero_cost() -> None:
         pass
 
 
-def llm_args() -> dict:
+def _rits_args() -> dict:
     """Return the litellm ``llm_args`` dict for RITS (resolves + caches lazily)."""
     key = _get_api_key()
     api_base = _resolve_api_base(key)
@@ -137,27 +143,40 @@ def llm_args() -> dict:
     }
 
 
+# Keep the old name as an alias for backwards compatibility.
+llm_args = _rits_args
+
+
 # ---------------------------------------------------------------------------
-# Provider-aware model selection (default = RITS gpt-oss; override for claude).
+# Vertex AI provider
 # ---------------------------------------------------------------------------
-# The agent and user-simulator models are env-overridable so the same adapter can
-# run on RITS gpt-oss (default) OR on a claude model via the IBM Anthropic-compatible
-# gateway (e.g. the on-demand integration test: TAU2_AGENT_MODEL=anthropic/claude-haiku-4-5).
+
+_VERTEX_DEFAULT_PROJECT = "itpc-gcp-octo-eng-claude"
+_VERTEX_DEFAULT_LOCATION = "global"
 
 
-def _is_anthropic(model: str) -> bool:
-    m = (model or "").lower()
-    return m.startswith("anthropic/") or "claude" in m
+def _ensure_vertex_env() -> None:
+    """Set VERTEXAI_PROJECT and VERTEXAI_LOCATION for litellm (idempotent)."""
+    _load_env()
+    project = os.environ.get("VERTEX_PROJECT", _VERTEX_DEFAULT_PROJECT)
+    location = os.environ.get("VERTEX_LOCATION", _VERTEX_DEFAULT_LOCATION)
+    os.environ.setdefault("VERTEXAI_PROJECT", project)
+    os.environ.setdefault("VERTEXAI_LOCATION", location)
 
 
-def agent_model() -> str:
-    """litellm model string for the agent under test (default: RITS gpt-oss)."""
-    return os.environ.get("TAU2_AGENT_MODEL") or LITELLM_MODEL
+def _vertex_args() -> dict:
+    """Return litellm kwargs for Vertex AI. ADC handles auth — no api_key needed."""
+    _ensure_vertex_env()
+    return {
+        "vertex_project": os.environ.get("VERTEXAI_PROJECT", _VERTEX_DEFAULT_PROJECT),
+        "vertex_location": os.environ.get("VERTEXAI_LOCATION", _VERTEX_DEFAULT_LOCATION),
+        "temperature": 0.0,
+    }
 
 
-def user_model() -> str:
-    """litellm model string for the user simulator (default: RITS gpt-oss)."""
-    return os.environ.get("TAU2_USER_MODEL") or LITELLM_MODEL
+# ---------------------------------------------------------------------------
+# IBM Anthropic-compatible gateway
+# ---------------------------------------------------------------------------
 
 
 def _gateway_args() -> dict:
@@ -185,8 +204,36 @@ def _gateway_args() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Provider-aware model selection + routing
+# ---------------------------------------------------------------------------
+
+
+def _is_vertex(model: str) -> bool:
+    return (model or "").lower().startswith("vertex_ai/")
+
+
+def _is_anthropic(model: str) -> bool:
+    m = (model or "").lower()
+    return m.startswith("anthropic/") or "claude" in m
+
+
+def agent_model() -> str:
+    """litellm model string for the agent under test (default: RITS gpt-oss)."""
+    _load_env()
+    return os.environ.get("TAU2_AGENT_MODEL") or LITELLM_MODEL
+
+
+def user_model() -> str:
+    """litellm model string for the user simulator (default: RITS gpt-oss)."""
+    _load_env()
+    return os.environ.get("TAU2_USER_MODEL") or LITELLM_MODEL
+
+
 def llm_args_for(model: str) -> dict:
-    """Per-model litellm args: claude models -> IBM gateway; anything else -> RITS."""
+    """Per-model litellm args: vertex_ai/ -> Vertex, anthropic/ -> gateway, else RITS."""
+    if _is_vertex(model):
+        return _vertex_args()
     if _is_anthropic(model):
         return _gateway_args()
-    return llm_args()
+    return _rits_args()
