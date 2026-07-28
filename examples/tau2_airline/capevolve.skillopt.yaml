@@ -1,0 +1,48 @@
+# cap-evolve spec — GEPA algorithm, all three capability surfaces.
+# Agent: Vertex AI (set TAU2_AGENT_MODEL + VERTEX_PROJECT + VERTEX_LOCATION in .env)
+# Optimizer: Claude Code @ claude-opus-4-6
+
+# --- what to optimize -------------------------------------------------------
+capabilities: [skill-package, tools, system-prompt]
+capability_path: seed_capability
+actions: [edit]
+capability_sources: [seed_capability/reference/data_model.py]
+
+# --- who proposes edits -----------------------------------------------------
+optimizer_skill: claude-code
+optimizer_model: claude-opus-4-6
+optimizer_max_turns: 40
+optimizer_usd_per_iter: 40.0
+
+# --- how to iterate ---------------------------------------------------------
+algorithm_skill: skillopt
+# algorithm_focus: round_robin
+
+# GEPA-specific: minibatch cheap gate before full-val spend
+# gepa_minibatch_size: 4
+# gepa_max_merges: 2
+# gepa_merge_cadence: 3
+
+# --- data + splits ----------------------------------------------------------
+dataset_source: adapter
+split_seed: 0
+split_train: 0.6
+split_val: 0.2
+split_test: 0.2
+
+# --- scoring ----------------------------------------------------------------
+num_trials: 5
+
+# --- acceptance gate --------------------------------------------------------
+gate_mode: paired
+gate_k_se: 0.2
+
+# --- budget -----------------------------------------------------------------
+max_iterations: 10
+stall: 0
+max_metric_calls: 0
+max_usd: 200.0
+max_optimizer_usd: 120.0
+
+# --- iteration store --------------------------------------------------------
+store: git

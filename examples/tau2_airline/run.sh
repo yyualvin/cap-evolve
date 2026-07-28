@@ -16,8 +16,8 @@ export TAU2_INFRA_RETRIES="${TAU2_INFRA_RETRIES:-2}"
 echo "tau2-bench commit: $(cat "$EX_DIR/run_full/TAU2_COMMIT.txt" 2>/dev/null || echo '?')"
 echo "optimizer: claude-code @ claude-opus-4-6 | 10 iters · 50 tasks · 10 trials · concurrency $TAU2_MAX_CONCURRENCY"
 echo "------ pre-run cost preview (spends nothing) ------"
-"$REPO/.venv/bin/cap-evolve" estimate --spec "$PROJECT/capevolve.yaml" --project "$PROJECT"
+"$REPO/.venv/bin/cap-evolve" estimate --spec "$PROJECT/capevolve.skillopt.yaml" --project "$PROJECT"
 echo "------ cap-evolve run (live dashboard) ------"
 "$REPO/.venv/bin/cap-evolve" run \
-  --spec "$PROJECT/capevolve.yaml" --project "$PROJECT" \
+  --spec "$PROJECT/capevolve.skillopt.yaml" --project "$PROJECT" \
   --run-ts full --dashboard "${CAPEVOLVE_DASHBOARD:-auto}"

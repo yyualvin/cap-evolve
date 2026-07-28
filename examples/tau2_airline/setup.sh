@@ -65,7 +65,7 @@ PROJECT="$REPO/.capevolve/project"
 mkdir -p "$PROJECT/adapters"
 cp "$EX_DIR/adapters/adapter.py" "$EX_DIR/adapters/rits.py" "$PROJECT/adapters/"
 rm -rf "$PROJECT/seed_capability"; cp -R "$EX_DIR/seed_capability" "$PROJECT/seed_capability"
-cp "$EX_DIR/capevolve.yaml" "$EX_DIR/capevolve.smoke.yaml" \
+cp "$EX_DIR/capevolve.yaml" "$EX_DIR/capevolve.skillopt.yaml" "$EX_DIR/capevolve.smoke.yaml" \
    "$EX_DIR/split_ids.json" "$EX_DIR/smoke_split.json" "$PROJECT/"
 echo "  project scaffolded + integration wired at $PROJECT"
 
