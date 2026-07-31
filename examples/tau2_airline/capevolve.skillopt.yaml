@@ -15,9 +15,7 @@ optimizer_max_turns: 40
 optimizer_usd_per_iter: 40.0
 
 # --- how to iterate ---------------------------------------------------------
-algorithm_skill: hill-climb
-algorithm_focus: all
-# algorithm_focus: round_robin
+algorithm_skill: skillopt
 
 # GEPA-specific: minibatch cheap gate before full-val spend
 # gepa_minibatch_size: 4
@@ -42,7 +40,7 @@ gate_k_se: 0.2
 max_iterations: 10
 stall: 0
 max_metric_calls: 0
-max_usd: 200.0
+max_usd: 300.0
 max_optimizer_usd: 120.0
 
 # --- iteration store --------------------------------------------------------
