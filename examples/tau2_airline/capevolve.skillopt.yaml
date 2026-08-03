@@ -15,7 +15,7 @@ optimizer_max_turns: 40
 optimizer_usd_per_iter: 40.0
 
 # --- how to iterate ---------------------------------------------------------
-algorithm_skill: skillopt
+algorithm_skill: gepa
 
 # GEPA-specific: minibatch cheap gate before full-val spend
 # gepa_minibatch_size: 4
