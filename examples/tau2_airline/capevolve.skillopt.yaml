@@ -3,7 +3,7 @@
 # Optimizer: Claude Code @ claude-opus-4-6
 
 # --- what to optimize -------------------------------------------------------
-capabilities: [tools, system-prompt]
+capabilities: [skill-package]
 capability_path: seed_capability
 actions: [edit]
 capability_sources: [seed_capability/reference/data_model.py]
