@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "capevolve-harbor"
 version = "0.1.0"
 description = "Harbor integration utilities for cap-evolve — task packaging, job runner, result parser."
-readme = "../README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = []
