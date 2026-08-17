@@ -13,7 +13,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vllm-optimizer-cache
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app.kubernetes.io/part-of: cap-evolve
     component: vllm
@@ -30,7 +30,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm-optimizer
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app: vllm-optimizer
     component: vllm
@@ -129,7 +129,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: vllm-optimizer
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app: vllm-optimizer
     component: vllm
@@ -149,7 +149,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: vllm-optimizer
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app: vllm-optimizer
     component: vllm
