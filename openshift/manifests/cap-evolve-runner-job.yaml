@@ -8,14 +8,14 @@
 #   cap-evolve check .capevolve/project
 #
 # To populate the PVC, deploy the persistent runner first, exec in, and copy:
-#   oc cp .capevolve/project cap-evolve/<runner-pod>:/workspace/.capevolve/project
+#   oc cp .capevolve/project skill-optimization/<runner-pod>:/workspace/.capevolve/project
 # =============================================================================
 
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: cap-evolve-run
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app.kubernetes.io/part-of: cap-evolve
 spec:

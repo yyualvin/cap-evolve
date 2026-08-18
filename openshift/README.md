@@ -6,7 +6,7 @@ Deploy cap-evolve on OpenShift with GPU-accelerated model serving via [vLLM](htt
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│  OpenShift  (namespace: cap-evolve)                        │
+│  OpenShift  (namespace: skill-optimization)              │
 │                                                            │
 │  vLLM Agent (7B, 1 GPU) ◄── cap-evolve Runner (CPU)       │
 │                               │                            │
@@ -49,7 +49,7 @@ oc apply -f openshift/manifests/pvc.yaml
 #    HuggingFace token (for gated model downloads):
 oc create secret generic hf-token \
   --from-literal=HF_TOKEN=<YOUR_HF_TOKEN> \
-  -n cap-evolve
+  -n skill-optimization
 #    Or edit and apply the template:
 #    oc apply -f openshift/manifests/secrets.yaml
 
@@ -57,7 +57,7 @@ oc create secret generic hf-token \
 oc apply -f openshift/manifests/vllm-serving.yaml
 
 # Wait for the model to load (5-15 min on first deploy)
-oc get pods -n cap-evolve -l component=vllm -w
+oc get pods -n skill-optimization -l component=vllm -w
 
 # 4. Build and push the runner image
 podman login quay.io
@@ -69,16 +69,16 @@ podman push quay.io/<your-org>/cap-evolve-runner:latest
 #    (.capevolve/project/ is generated locally by the intake phase —
 #    see docs/OPTIMIZE_YOUR_OWN.md)
 oc apply -f openshift/manifests/cap-evolve-runner-deployment.yaml
-POD=$(oc get pod -n cap-evolve -l app=cap-evolve-runner \
+POD=$(oc get pod -n skill-optimization -l app=cap-evolve-runner \
   -o jsonpath='{.items[0].metadata.name}' --field-selector=status.phase=Running)
-oc cp .capevolve/project cap-evolve/$POD:/workspace/.capevolve/project
+oc cp .capevolve/project skill-optimization/$POD:/workspace/.capevolve/project
 
 # 6. Run the optimizer (update image: in the manifest first)
 oc apply -f openshift/manifests/cap-evolve-runner-job.yaml
-oc logs -n cap-evolve job/cap-evolve-run -f
+oc logs -n skill-optimization job/cap-evolve-run -f
 
 # 7. Get results
-oc cp cap-evolve/$POD:/workspace/.capevolve ./results
+oc cp skill-optimization/$POD:/workspace/.capevolve ./results
 cat results/run_*/report.md
 ```
 
@@ -86,8 +86,8 @@ cat results/run_*/report.md
 > ```bash
 > oc create secret docker-registry registry-pull \
 >   --docker-server=quay.io --docker-username=<user> --docker-password=<token> \
->   -n cap-evolve
-> oc secrets link cap-evolve-runner registry-pull --for=pull -n cap-evolve
+>   -n skill-optimization
+> oc secrets link cap-evolve-runner registry-pull --for=pull -n skill-optimization
 > ```
 
 ### Interactive mode
@@ -95,7 +95,7 @@ cat results/run_*/report.md
 The persistent runner (deployed in step 5) can also be used interactively:
 
 ```bash
-oc exec -n cap-evolve -it deployment/cap-evolve-runner -- bash
+oc exec -n skill-optimization -it deployment/cap-evolve-runner -- bash
 
 # inside the pod
 cd /workspace

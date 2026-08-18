@@ -6,7 +6,7 @@
 #
 # Usage:
 #   oc apply -f cap-evolve-runner-deployment.yaml
-#   oc cp .capevolve/project cap-evolve/<pod>:/workspace/.capevolve/project
+#   oc cp .capevolve/project skill-optimization/<pod>:/workspace/.capevolve/project
 #   oc exec -it deployment/cap-evolve-runner -- bash
 #   cd /workspace && cap-evolve run --spec .capevolve/project/capevolve.yaml \
 #     --project .capevolve/project --run-ts run1 --dashboard off
@@ -16,7 +16,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cap-evolve-runner
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app: cap-evolve-runner
     app.kubernetes.io/part-of: cap-evolve
