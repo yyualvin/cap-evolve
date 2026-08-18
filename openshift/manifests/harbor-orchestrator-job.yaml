@@ -1,0 +1,110 @@
+# =============================================================================
+# Harbor Orchestrator Job
+#
+# Runs a cap-evolve + Harbor optimization on the cluster, so you don't need
+# to keep your laptop on. This is the cluster equivalent of envs.sh.
+#
+# Prerequisites:
+#   1. Build & push the image:
+#        openshift/images/cap-evolve-harbor-runner/build.sh
+#   2. Apply RBAC:
+#        oc apply -f harbor-task-service-account.yaml
+#        oc apply -f harbor-orchestrator-sa.yaml
+#   3. Create the Vertex AI credentials secret:
+#        oc create secret generic vertex-credentials \
+#          --from-file=credentials.json=$HOME/.config/gcloud/application_default_credentials.json \
+#          -n skill-optimization
+#   4. Copy project config onto the workspace PVC:
+#        oc cp .capevolve/project <runner-pod>:/workspace/.capevolve/project
+#   5. Apply this job:
+#        oc apply -f harbor-orchestrator-job.yaml
+# =============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-orchestrator
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: harbor-orchestrator
+      containers:
+        - name: orchestrator
+          image: image-registry.openshift-image-registry.svc:5000/skill-optimization/cap-evolve-harbor-runner:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              cd /workspace
+              export HARBOR_TASK_IDS="$(tr '\n' ',' < "$HARBOR_TASK_IDS_FILE" | sed 's/,$//')"
+              cap-evolve run \
+                --spec /workspace/.capevolve/project/adapters/capevolve.yaml \
+                --project /workspace/.capevolve/project \
+                --run-ts "$RUN_NAME" \
+                --dashboard auto --dashboard-port 7878
+          workingDir: /workspace
+          env:
+            - name: RUN_NAME
+              value: "RHSWEBENCH-TESTRUN"
+            # --- Harbor ---
+            - name: HARBOR_BIN
+              value: "harbor"
+            - name: HARBOR_DATASET
+              value: "rounakbende10/rh-swe-bench"
+            - name: HARBOR_AGENT
+              value: "claude-code"
+            - name: HARBOR_MODEL
+              value: "claude-sonnet-4-6"
+            - name: HARBOR_PARALLEL
+              value: "8"
+            - name: HARBOR_TIMEOUT
+              value: "1800"
+            - name: HARBOR_EXTRA_FLAGS
+              value: "-e openshift"
+            - name: HARBOR_TASK_IDS_FILE
+              value: "/workspace/.capevolve/project/adapters/task_ids_pilot.txt"
+            # --- Claude Code via Vertex AI ---
+            - name: CLAUDE_CODE_USE_VERTEX
+              value: "1"
+            - name: CLOUD_ML_REGION
+              value: "global"
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vertex-credentials
+                  key: project-id
+                  optional: true
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/secrets/vertex/credentials.json"
+            # --- Python / cap-evolve ---
+            - name: PYTHONPATH
+              value: "/workspace/.capevolve/project/adapters:/app"
+            - name: CAPEVOLVE_SKILLS_DIR
+              value: "/app/skills"
+            - name: GIT_EDITOR
+              value: "true"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: vertex-credentials
+              mountPath: /secrets/vertex
+              readOnly: true
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: cap-evolve-workspace
+        - name: vertex-credentials
+          secret:
+            secretName: vertex-credentials

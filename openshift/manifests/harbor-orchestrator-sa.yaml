@@ -1,0 +1,71 @@
+# ServiceAccount used by the cap-evolve + Harbor orchestrator Job when running
+# `harbor run -e openshift`. Harbor's OpenShift executor drives `oc` internally
+# to create, watch, and delete per-task pods — this SA provides the minimum
+# RBAC for that. The orchestrator Job should set serviceAccountName: harbor-orchestrator.
+#
+# Apply order:
+#   oc apply -f harbor-task-service-account.yaml   # task pod identity
+#   oc apply -f harbor-orchestrator-sa.yaml         # orchestrator identity + RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harbor-orchestrator
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+---
+# Role: pod management so Harbor can launch, poll, and clean up task pods.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harbor-orchestrator
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harbor-orchestrator
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: harbor-orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: harbor-orchestrator
+    namespace: skill-optimization
+---
+# SCC binding: lets the orchestrator pod itself run under the scoped
+# harbor-task-scc rather than the broad anyuid SCC.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harbor-orchestrator-scc
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:harbor-task-scc
+subjects:
+  - kind: ServiceAccount
+    name: harbor-orchestrator
+    namespace: skill-optimization

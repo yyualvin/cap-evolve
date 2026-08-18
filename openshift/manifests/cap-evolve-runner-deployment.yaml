@@ -16,7 +16,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cap-evolve-runner
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app: cap-evolve-runner
     app.kubernetes.io/part-of: cap-evolve

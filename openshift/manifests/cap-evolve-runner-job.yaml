@@ -15,7 +15,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: cap-evolve-run
-  namespace: cap-evolve
+  namespace: skill-optimization
   labels:
     app.kubernetes.io/part-of: cap-evolve
 spec:

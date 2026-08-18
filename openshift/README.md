@@ -35,6 +35,26 @@ for `claude-code`).
 - [HuggingFace token](https://huggingface.co/settings/tokens) (for gated models)
 - Optimizer credentials (e.g., `ANTHROPIC_API_KEY` for `claude-code`)
 
+## Harbor orchestrator image (ROSA internal registry)
+
+For `harbor run -e openshift` (rh-swe-bench, etc.), build the all-in-one orchestrator
+image and push to your cluster registry — **no Quay required**:
+
+```bash
+# From repo root; requires oc logged in and podman
+./openshift/images/cap-evolve-harbor-runner/build.sh
+
+# Verify
+oc get imagestream cap-evolve-harbor-runner -n skill-optimization
+```
+
+Image contents: `cap-evolve`, `harbor`, `oc`, `capevolve_harbor`, `claude-code`.
+Use `serviceAccountName: harbor-orchestrator` on the Job. In-cluster pull URL:
+
+`image-registry.openshift-image-registry.svc:5000/skill-optimization/cap-evolve-harbor-runner:latest`
+
+See [`site/harbor.html`](../../site/harbor.html) for Harbor + OpenShift RBAC.
+
 ## Deploy
 
 All commands run from the repo root. Replace `<your-org>` with your registry organization.
