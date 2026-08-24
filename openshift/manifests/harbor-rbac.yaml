@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harbor-task
+  namespace: skill-optimization
+  labels:
+    app.kubernetes.io/part-of: cap-evolve
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cap-evolve-runner-harbor
+  namespace: skill-optimization
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["build.openshift.io"]
+    resources: ["buildconfigs"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["build.openshift.io"]
+    resources: ["buildconfigs/instantiate", "buildconfigs/instantiatebinary"]
+    verbs: ["create"]
+  - apiGroups: ["build.openshift.io"]
+    resources: ["builds"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["build.openshift.io"]
+    resources: ["builds/log"]
+    verbs: ["get"]
+  - apiGroups: ["image.openshift.io"]
+    resources: ["imagestreams"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["image.openshift.io"]
+    resources: ["imagestreamtags"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cap-evolve-runner-harbor
+  namespace: skill-optimization
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cap-evolve-runner-harbor
+subjects:
+  - kind: ServiceAccount
+    name: cap-evolve-runner
+    namespace: skill-optimization
+---
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: harbor-task-scc
+allowPrivilegedContainer: false
+allowHostNetwork: false
+allowHostPorts: false
+allowHostPID: false
+allowHostIPC: false
+allowHostDirVolumePlugin: false
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - configMap
+  - emptyDir
+  - projected
+  - secret
+  - downwardAPI
+  - persistentVolumeClaim
+allowedCapabilities:
+  - CHOWN
+  - DAC_OVERRIDE
+  - FOWNER
+  - FSETID
+  - KILL
+  - NET_BIND_SERVICE
+  - SETGID
+  - SETUID
+  - SYS_CHROOT
+defaultAddCapabilities: []
+requiredDropCapabilities:
+  - ALL
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harbor-task-scc
+  namespace: skill-optimization
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:harbor-task-scc
+subjects:
+  - kind: ServiceAccount
+    name: harbor-task
+    namespace: skill-optimization

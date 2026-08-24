@@ -1,15 +1,14 @@
 # =============================================================================
 # cap-evolve Persistent Runner
 #
-# An always-on pod for interactive optimization runs. Exec in, copy your
-# project config onto the workspace PVC, and run cap-evolve interactively.
+# An always-on pod that logs into OpenShift, runs openshift/run.sh, and stays
+# alive for dashboard access, logs, and result retrieval.
 #
 # Usage:
 #   oc apply -f cap-evolve-runner-deployment.yaml
-#   oc cp .capevolve/project skill-optimization/<pod>:/workspace/.capevolve/project
-#   oc exec -it deployment/cap-evolve-runner -- bash
-#   cd /workspace && cap-evolve run --spec .capevolve/project/capevolve.yaml \
-#     --project .capevolve/project --run-ts run1 --dashboard off
+#   oc logs -f deployment/cap-evolve-runner
+#   oc port-forward deployment/cap-evolve-runner 7878:7878
+#   # open http://127.0.0.1:7878
 # =============================================================================
 
 apiVersion: apps/v1
@@ -33,29 +32,40 @@ spec:
       serviceAccountName: cap-evolve-runner
       containers:
         - name: runner
-          image: quay.io/<YOUR_ORG>/cap-evolve-runner:latest
+          image: image-registry.openshift-image-registry.svc:5000/skill-optimization/cap-evolve-runner:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/cap-evolve-runner-entrypoint"]
+          # Secret-backed runtime config (ANTHROPIC_VERTEX_PROJECT_ID, etc.) — generated
+          # from openshift/.env, see openshift/README.md step 2. `optional: true` so the
+          # Deployment still applies before that secret exists (e.g. on first apply).
+          envFrom:
+            - secretRef:
+                name: cap-evolve-runner-env
+                optional: true
           env:
             # --- Python / cap-evolve ---
             - name: PYTHONPATH
               value: "/workspace/.capevolve/project/adapters:/app"
             - name: CAPEVOLVE_SKILLS_DIR
               value: "/app/skills"
+            # capevolve_dashboard.server.resolve_static_dir() finds the built frontend by
+            # walking up from its own __file__ — that only works when the package runs
+            # from a source checkout. This image installs it as a regular (non-editable)
+            # package into site-packages, so auto-detection fails and every non-API path
+            # 404s. Point it at the real location the Dockerfile COPYs the built SPA to.
+            - name: CAPEVOLVE_STATIC_DIR
+              value: "/app/dashboard/frontend/dist"
             - name: TAU2_DATA_DIR
               value: "/app/tau2-bench/data"
-            # --- Agent model (vLLM via model_config.py convention) ---
-            - name: MODEL
-              value: "openai/qwen2.5-7b-instruct"
-            - name: OPENAI_API_BASE
-              value: "http://vllm-agent:80/v1"
-            - name: OPENAI_API_KEY
-              value: "dummy"
-            - name: TAU2_MAX_CONCURRENCY
-              value: "30"
-            # --- Optimizer ---
-            # The optimizer is a coding-agent CLI (claude-code, codex, gemini-cli, …)
-            # configured via optimizer_skill in capevolve.yaml.
-            # For claude-code: set ANTHROPIC_API_KEY (or log in interactively).
-            # For other agents: see skills/optimizers/registry.yaml.
+            - name: OPENSHIFT_NAMESPACE
+              value: "skill-optimization"
+            # --- Vertex / Claude ---
+            # ANTHROPIC_VERTEX_PROJECT_ID comes from the cap-evolve-runner-env secret
+            # (envFrom above), not hardcoded here — see openshift/.env.
+            - name: CLOUD_ML_REGION
+              value: "global"
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/tmp/.config/gcloud/application_default_credentials.json"
           resources:
             requests:
               cpu: 500m
@@ -66,7 +76,14 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: gcp-vertex-credentials
+              mountPath: /tmp/.config/gcloud/application_default_credentials.json
+              subPath: application_default_credentials.json
+              readOnly: true
       volumes:
         - name: workspace
           persistentVolumeClaim:
             claimName: cap-evolve-workspace
+        - name: gcp-vertex-credentials
+          secret:
+            secretName: gcp-vertex-credentials

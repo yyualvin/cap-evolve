@@ -1,23 +1,56 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+ARG OC_VERSION=4.16.13
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    nodejs \
+    npm \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# claude-code is the EDIT PROPOSER for cap-evolve's optimizer step (hill-climb calls it
+# directly inside this pod, not inside a Harbor sandbox — those install their own copy
+# per task). Without it, every optimizer iteration fails with `cli_present: false` and
+# silently reports best=seed (see ci/benchmarks/lib/ci_setup.sh for the same footgun in CI).
+RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
-# Install cap-evolve core (zero runtime deps — pure stdlib)
+# Install OpenShift CLI used by Harbor's openshift backend.
+RUN curl -fsSL -o /tmp/oc.tar.gz \
+    "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC_VERSION}/openshift-client-linux-${OC_VERSION}.tar.gz" \
+    && tar -C /usr/local/bin -xzf /tmp/oc.tar.gz oc kubectl \
+    && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl \
+    && rm -f /tmp/oc.tar.gz
+
+# Install cap-evolve core.
 COPY core/ /app/core/
-RUN pip install --no-cache-dir /app/core
+COPY capevolve_harbor/ /app/capevolve_harbor/
+COPY dashboard/backend/ /app/dashboard/backend/
+
+RUN pip install --no-cache-dir \
+    /app/core \
+    /app/capevolve_harbor \
+    /app/dashboard/backend \
+    harbor
 
 # Install tau2-bench and litellm for benchmark evaluation
 RUN git clone --depth 1 https://github.com/sierra-research/tau2-bench.git /app/tau2-bench && \
     pip install --no-cache-dir /app/tau2-bench litellm
 
-# Copy skills library
+# Copy skills and static dashboard frontend assets.
 COPY skills/ /app/skills/
+COPY dashboard/frontend/dist/ /app/dashboard/frontend/dist/
 
-# Project config (.capevolve/project/) is generated at runtime by the
-# intake/scaffold phase and must be mounted or copied into the container
-# at launch time. See the runner Job manifest for an example.
+# Seed files copied into workspace by the container entrypoint.
+COPY .capevolve/project/ /opt/cap-evolve-seed/.capevolve/project/
+COPY openshift/run.sh /opt/cap-evolve-seed/openshift/run.sh
+COPY openshift/task_ids_*.txt /opt/cap-evolve-seed/openshift/
+COPY openshift/images/cap-evolve-runner/entrypoint.sh /usr/local/bin/cap-evolve-runner-entrypoint
+RUN chmod +x /usr/local/bin/cap-evolve-runner-entrypoint
 
 ENV PYTHONPATH="/app" \
     CAPEVOLVE_SKILLS_DIR="/app/skills" \
@@ -25,4 +58,4 @@ ENV PYTHONPATH="/app" \
     GIT_EDITOR=true \
     HOME=/tmp
 
-CMD ["sleep", "infinity"]
+CMD ["/usr/local/bin/cap-evolve-runner-entrypoint"]

@@ -1,0 +1,34 @@
+# Applies to all `oc start-build --from-dir=.` / `docker build` invocations from repo
+# root. Binary builds tar up the raw local directory regardless of .gitignore, so local
+# build caches here would otherwise get baked into images as stale, silently-wrong code
+# (see: core/build/ + core/*.egg-info/ shadowing fresh cap_evolve/ source in a wheel
+# build). Keep this in sync with .gitignore's build-artifact entries.
+
+.git/
+
+# Python build caches / artifacts (must never shadow fresh source in setuptools builds)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+.venv-*/
+venv/
+
+# local scratch / secrets — never needed inside an image build
+e2e/
+.env
+.env.*
+!.env.example
+.DS_Store
+.demo/
+
+# .capevolve/ run history (run_*, memory.jsonl, ...) is local scratch, NOT source —
+# exclude it, but Dockerfile COPYs .capevolve/project/ as seed content, so keep that.
+# (Docker can't re-include a path whose parent dir is fully excluded, hence `.capevolve/*`
+# here rather than `.capevolve/`.)
+.capevolve/*
+!.capevolve/project

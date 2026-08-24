@@ -43,44 +43,62 @@ All commands run from the repo root. Replace `<your-org>` with your registry org
 # 1. Namespace, RBAC, and PVC
 oc apply -f openshift/manifests/namespace.yaml
 oc apply -f openshift/manifests/service-account.yaml
+oc apply -f openshift/manifests/harbor-rbac.yaml
 oc apply -f openshift/manifests/pvc.yaml
 
-# 2. Secrets
-#    HuggingFace token (for gated model downloads):
-oc create secret generic hf-token \
-  --from-literal=HF_TOKEN=<YOUR_HF_TOKEN> \
-  -n skill-optimization
-#    Or edit and apply the template:
-#    oc apply -f openshift/manifests/secrets.yaml
+# 2. Secrets — driven by ONE local env file (never committed; see .gitignore)
+cp openshift/.env.example openshift/.env   # first time only, then fill in real values
+set -a; source openshift/.env; set +a
 
-# 3. vLLM model server
-oc apply -f openshift/manifests/vllm-serving.yaml
+#    Runtime config secret (ANTHROPIC_VERTEX_PROJECT_ID, etc.) — the Deployment
+#    picks these up automatically via envFrom, no YAML editing needed:
+oc create secret generic cap-evolve-runner-env \
+  -n skill-optimization \
+  --from-literal=ANTHROPIC_VERTEX_PROJECT_ID="$ANTHROPIC_VERTEX_PROJECT_ID" \
+  --dry-run=client -o yaml | oc apply -f -
 
-# Wait for the model to load (5-15 min on first deploy)
-oc get pods -n skill-optimization -l component=vllm -w
+#    GCP Vertex credentials file (required by openshift/run.sh):
+oc create secret generic gcp-vertex-credentials \
+  -n skill-optimization \
+  --from-file=application_default_credentials.json="$GCP_ADC_JSON" \
+  --dry-run=client -o yaml | oc apply -f -
 
-# 4. Build and push the runner image
-podman login quay.io
-podman build -t quay.io/<your-org>/cap-evolve-runner:latest \
-  -f openshift/images/cap-evolve-runner/Dockerfile .
-podman push quay.io/<your-org>/cap-evolve-runner:latest
+#    Optional HuggingFace token (needed only if you also deploy vLLM):
+#    oc create secret generic hf-token --from-literal=HF_TOKEN="$HF_TOKEN" -n skill-optimization
 
-# 5. Deploy the runner and copy your project config
-#    (.capevolve/project/ is generated locally by the intake phase —
-#    see docs/OPTIMIZE_YOUR_OWN.md)
+# 3. Build runner image on-cluster (internal registry)
+oc new-build --binary --strategy=docker --name=cap-evolve-runner -n skill-optimization
+oc start-build cap-evolve-runner --from-dir=. --follow -n skill-optimization
+
+# 4. Deploy persistent runner pod
 oc apply -f openshift/manifests/cap-evolve-runner-deployment.yaml
-POD=$(oc get pod -n skill-optimization -l app=cap-evolve-runner \
-  -o jsonpath='{.items[0].metadata.name}' --field-selector=status.phase=Running)
-oc cp .capevolve/project skill-optimization/$POD:/workspace/.capevolve/project
 
-# 6. Run the optimizer (update image: in the manifest first)
-oc apply -f openshift/manifests/cap-evolve-runner-job.yaml
-oc logs -n skill-optimization job/cap-evolve-run -f
+# 5. Watch run progress
+oc logs -n skill-optimization -f deployment/cap-evolve-runner
+
+# 6. Open live dashboard (in another terminal)
+oc port-forward -n skill-optimization deployment/cap-evolve-runner 7878:7878
+
+# Visit:
+#   http://127.0.0.1:7878
 
 # 7. Get results
+POD=$(oc get pod -n skill-optimization -l app=cap-evolve-runner \
+  -o jsonpath='{.items[0].metadata.name}' --field-selector=status.phase=Running)
 oc cp skill-optimization/$POD:/workspace/.capevolve ./results
 cat results/run_*/report.md
 ```
+
+> **Cluster-admin prerequisite:** `openshift/manifests/harbor-rbac.yaml` contains a
+> cluster-scoped SCC (`harbor-task-scc`). A cluster-admin (or equivalent) must apply it.
+> Namespace-scoped RoleBindings can be applied by project admins.
+
+> **Rotating/updating `openshift/.env` later?** Re-run the step 2 `oc create secret ...`
+> commands, then restart the pod so it picks up the new values (env vars from Secrets
+> are only read at container start, not hot-reloaded):
+> ```bash
+> oc rollout restart deployment/cap-evolve-runner -n skill-optimization
+> ```
 
 > **Private registry?** Create a pull secret:
 > ```bash
@@ -92,17 +110,14 @@ cat results/run_*/report.md
 
 ### Interactive mode
 
-The persistent runner (deployed in step 5) can also be used interactively:
+The persistent runner (deployed in step 4) can also be used interactively:
 
 ```bash
 oc exec -n skill-optimization -it deployment/cap-evolve-runner -- bash
 
 # inside the pod
 cd /workspace
-cap-evolve run \
-  --spec .capevolve/project/capevolve.yaml \
-  --project .capevolve/project \
-  --run-ts run1 --dashboard off
+bash ./openshift/run.sh
 ```
 
 ## Configuration
