@@ -1,0 +1,170 @@
+# =============================================================================
+# LiteLLM Proxy — cloud model gateway for Harbor / claude-code
+#
+# CPU-only routing layer. Task pods and the cap-evolve runner call this Service
+# as ANTHROPIC_BASE_URL; LiteLLM forwards to OpenAI / Anthropic backends.
+#
+# Prereqs (namespace skill-optimization must already exist — oc project skill-optimization):
+#   oc apply -f openshift/manifests/litellm-proxy-secrets.yaml   # or oc create secret ...
+#   oc apply -f openshift/manifests/litellm-proxy.yaml
+#
+# In-cluster URL (Harbor task pods, cap-evolve runner):
+#   http://litellm-proxy.skill-optimization.svc:4000
+#
+# See openshift/README.md § LiteLLM proxy for external testing.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-proxy-config
+  namespace: skill-optimization
+  labels:
+    app: litellm-proxy
+    component: litellm-proxy
+    app.kubernetes.io/part-of: cap-evolve
+data:
+  # Source of truth: openshift/litellm-proxy/config.yaml (keep in sync).
+  config.yaml: |
+    model_list:
+      - model_name: gpt-5.6-luna
+        litellm_params:
+          model: openai/gpt-5.6-luna
+          api_key: os.environ/OPENAI_API_KEY
+    litellm_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+      drop_params: true
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+      health_check_auth: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-proxy
+  namespace: skill-optimization
+  labels:
+    app: litellm-proxy
+    component: litellm-proxy
+    app.kubernetes.io/part-of: cap-evolve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm-proxy
+      component: litellm-proxy
+  template:
+    metadata:
+      labels:
+        app: litellm-proxy
+        component: litellm-proxy
+    spec:
+      containers:
+        - name: litellm
+          image: docker.litellm.ai/berriai/litellm:main-stable
+          args:
+            - "--config"
+            - "/etc/litellm/config.yaml"
+            - "--port"
+            - "4000"
+            - "--host"
+            - "0.0.0.0"
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: litellm-proxy
+          # LiteLLM returns 401 on /health when master_key is set unless the probe
+          # sends Authorization. Use exec + env from the Secret (not bare httpGet).
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  python3 -c "
+                  import os, urllib.request
+                  key = os.environ['LITELLM_MASTER_KEY']
+                  req = urllib.request.Request(
+                      'http://127.0.0.1:4000/health',
+                      headers={'Authorization': f'Bearer {key}'},
+                  )
+                  urllib.request.urlopen(req, timeout=4)
+                  "
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 8
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  python3 -c "
+                  import os, urllib.request
+                  key = os.environ['LITELLM_MASTER_KEY']
+                  req = urllib.request.Request(
+                      'http://127.0.0.1:4000/health',
+                      headers={'Authorization': f'Bearer {key}'},
+                  )
+                  urllib.request.urlopen(req, timeout=4)
+                  "
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 8
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-proxy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-proxy
+  namespace: skill-optimization
+  labels:
+    app: litellm-proxy
+    component: litellm-proxy
+    app.kubernetes.io/part-of: cap-evolve
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+  selector:
+    app: litellm-proxy
+    component: litellm-proxy
+---
+# Optional: HTTPS access from outside the cluster (and from other namespaces
+# without port-forward). Restrict with OAuth/mTLS in production.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: litellm-proxy
+  namespace: skill-optimization
+  labels:
+    app: litellm-proxy
+    component: litellm-proxy
+    app.kubernetes.io/part-of: cap-evolve
+spec:
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+  to:
+    kind: Service
+    name: litellm-proxy
+    weight: 100

@@ -1,0 +1,40 @@
+# LiteLLM proxy config for cap-evolve / Harbor (claude-code).
+#
+# Claude Code talks Anthropic Messages API to ANTHROPIC_BASE_URL; LiteLLM serves
+# /v1/messages and routes to the backends below. model_name values are what you
+# pass as HARBOR_MODEL / optimizer_model (e.g. gpt-5.6-luna).
+#
+# Credentials come from the litellm-proxy Secret (os.environ/...), not this file.
+# Edit model_list for your OpenAI models, then:
+#   oc apply -f openshift/manifests/litellm-proxy.yaml
+
+model_list:
+  # --- OpenAI API (direct key) ---
+  # Set OPENAI_API_KEY in the litellm-proxy Secret.
+  # model_name must match HARBOR_MODEL exactly.
+  - model_name: gpt-5.6-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Add more OpenAI models as needed (same pattern):
+  # - model_name: gpt-4.1
+  #   litellm_params:
+  #     model: openai/gpt-4.1
+  #     api_key: os.environ/OPENAI_API_KEY
+
+  # --- Anthropic passthrough (optional) ---
+  # Uncomment and set ANTHROPIC_API_KEY in the Secret to route native Claude models.
+  # - model_name: claude-sonnet-4-6
+  #   litellm_params:
+  #     model: anthropic/claude-sonnet-4-6
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Let kubelet httpGet probes hit /health without a Bearer token (optional).
+  health_check_auth: false

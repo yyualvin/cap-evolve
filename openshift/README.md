@@ -5,22 +5,30 @@ Deploy cap-evolve on OpenShift with GPU-accelerated model serving via [vLLM](htt
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│  OpenShift  (namespace: cap-evolve)                        │
-│                                                            │
-│  vLLM Agent (7B, 1 GPU) ◄── cap-evolve Runner (CPU)       │
-│                               │                            │
-│                               └─► Optimizer CLI            │
-│                                   (claude-code / codex /   │
-│                                    gemini-cli / …)         │
-└───────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  OpenShift  (namespace: cap-evolve)                                 │
+│                                                                     │
+│  ┌─────────────────┐     egress      ┌──────────────────────────┐  │
+│  │ LiteLLM proxy   │ ──────────────► │ OpenAI / Anthropic APIs   │  │
+│  │ (CPU, :4000)    │                 └──────────────────────────┘  │
+│  └────────┬────────┘                                               │
+│           │  ANTHROPIC_BASE_URL (in-cluster)                        │
+│           ├──────────────────► Harbor task pods (claude-code)       │
+│           └──────────────────► cap-evolve runner (optimizer)        │
+│                                                                     │
+│  ┌─────────────────┐                                                │
+│  │ vLLM Agent      │ ◄── optional: self-hosted open models on GPU   │
+│  │ (7B, 1 GPU)     │                                                │
+│  └─────────────────┘                                                │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 | Component | Role | Resources |
 |-----------|------|-----------|
-| **vLLM Agent** | Executes benchmark tasks (the model being optimized) | 1+ GPUs |
+| **LiteLLM proxy** | Routes `claude-code` to OpenAI (direct API key) | CPU only |
+| **vLLM Agent** | Optional: serves open-weight models on-cluster | 1+ GPUs |
 | **Runner** | Runs the `cap-evolve` optimization loop | CPU only |
-| **Optimizer CLI** | Coding agent that proposes skill edits (configured via `capevolve.yaml`) | External API key or self-hosted |
+| **Optimizer CLI** | Coding agent that proposes skill edits (configured via `capevolve.yaml`) | Calls LiteLLM proxy or external API |
 
 The agent model is served on-cluster via vLLM. The optimizer is a coding-agent CLI
 (Claude Code, Codex, Gemini CLI, etc.) — see `skills/optimizers/registry.yaml` for
@@ -53,7 +61,14 @@ oc create secret generic hf-token \
 #    Or edit and apply the template:
 #    oc apply -f openshift/manifests/secrets.yaml
 
-# 3. vLLM model server
+# 3a. LiteLLM proxy (cloud models for Harbor / claude-code — GPT Luna, etc.)
+#     Edit openshift/litellm-proxy/config.yaml, then sync the ConfigMap in
+#     openshift/manifests/litellm-proxy.yaml (or re-apply after editing the manifest).
+oc apply -f openshift/manifests/litellm-proxy-secrets.yaml   # or oc create secret ...
+oc apply -f openshift/manifests/litellm-proxy.yaml
+oc get pods -n cap-evolve -l component=litellm-proxy -w
+
+# 3b. vLLM model server (optional — self-hosted open models on GPU)
 oc apply -f openshift/manifests/vllm-serving.yaml
 
 # Wait for the model to load (5-15 min on first deploy)
@@ -103,6 +118,69 @@ cap-evolve run \
   --spec .capevolve/project/capevolve.yaml \
   --project .capevolve/project \
   --run-ts run1 --dashboard off
+```
+
+## LiteLLM proxy
+
+Deploy a **CPU-only** gateway in the `skill-optimization` namespace so Harbor task pods and the
+cap-evolve optimizer can reach cloud models through `claude-code` (Anthropic Messages API
+in, Azure/OpenAI out).
+
+| File | Purpose |
+|------|---------|
+| `openshift/litellm-proxy/config.yaml` | Model routing (edit, then sync into the ConfigMap) |
+| `openshift/manifests/litellm-proxy-secrets.yaml` | Secret template (`LITELLM_MASTER_KEY`, `OPENAI_API_KEY`) |
+| `openshift/manifests/litellm-proxy.yaml` | Deployment + Service + Route |
+| `openshift/scripts/test-litellm-proxy.sh` | Smoke test from outside the namespace |
+
+### Wire Harbor / cap-evolve to the proxy
+
+In-cluster URL (use this in `run.sh` for OpenShift Harbor runs):
+
+```bash
+export HARBOR_AGENT_BASE_URL="http://litellm-proxy.skill-optimization.svc:4000"
+export HARBOR_AGENT_API_KEY="$LITELLM_MASTER_KEY"
+export ANTHROPIC_API_KEY="$LITELLM_MASTER_KEY"
+export HARBOR_MODEL="gpt-5.6-luna"   # must match model_name in config.yaml
+```
+
+Unset `CLAUDE_CODE_USE_VERTEX` when using the proxy.
+
+### Test from outside the namespace
+
+**Option 1 — port-forward** (laptop, no Route required):
+
+```bash
+oc port-forward -n skill-optimization svc/litellm-proxy 4000:4000
+export LITELLM_MASTER_KEY='sk-litellm-...'
+./openshift/scripts/test-litellm-proxy.sh http://localhost:4000
+```
+
+**Option 2 — OpenShift Route** (HTTPS URL, works from any network that can reach the cluster):
+
+```bash
+export LITELLM_MASTER_KEY='sk-litellm-...'
+ROUTE=$(oc get route litellm-proxy -n skill-optimization -o jsonpath='{.spec.host}')
+./openshift/scripts/test-litellm-proxy.sh "https://$ROUTE"
+```
+
+**Option 3 — from another namespace on the same cluster** (no Route, no port-forward):
+
+```bash
+# Run inside any pod that has curl, or from a debug pod in another namespace:
+curl -s http://litellm-proxy.skill-optimization.svc.cluster.local:4000/health
+```
+
+Cross-namespace Service DNS works by default unless a NetworkPolicy blocks it.
+
+Manual Anthropic probe (same API `claude-code` uses):
+
+```bash
+curl -s "$BASE_URL/v1/messages" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "content-type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{"model":"gpt-5.6-luna","max_tokens":32,"messages":[{"role":"user","content":"ping"}]}'
 ```
 
 ## Configuration
