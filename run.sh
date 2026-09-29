@@ -1,24 +1,34 @@
 #!/usr/bin/env bash
-# cap-evolve + Harbor on OpenShift (SWE-bench-verified) via LiteLLM proxy.
+# cap-evolve + Harbor on OpenShift (SWE-bench-verified) via AI gateway.
 #
 # Prereqs:
 #   - .venv with cap-evolve + harbor installed
 #   - oc login (Harbor uses -e openshift)
-#   - LiteLLM proxy deployed in skill-optimization (see openshift/README.md)
-#   - Port-forward for the local optimizer (claude-code runs on your laptop):
-#       oc port-forward -n skill-optimization svc/litellm-proxy 4000:4000
+#   - ANTHROPIC_API_KEY set (AI gateway key; do not commit it)
+#   - Local claude-code installed (optimizer runs on your laptop)
+#   - .capevolve/project/optimizer-claude/settings.json (GLM behavesAs)
 #
 # Usage:
+#   export ANTHROPIC_API_KEY='sk-oai-...'
 #   ./run.sh                          # pilot (50 tasks)
-#   HARBOR_TASK_IDS_FILE=... ./run.sh # full 500-task run
-#   RUN_TS=my-run ./run.sh
+#   HARBOR_TASK_IDS_FILE=.../task_ids_mini.txt RUN_TS=mini ./run.sh  # 10-task smoke
+#   HARBOR_TASK_IDS_FILE=.../task_ids.txt RUN_TS=full ./run.sh       # 500 tasks
 set -euo pipefail
+
+# Exports (esp. CLAUDE_CONFIG_DIR) must not stick in an interactive shell.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  echo "error: do not source run.sh — run it as ./run.sh" >&2
+  return 1 2>/dev/null || exit 1
+fi
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$REPO/.capevolve/project"
 SPEC="$PROJECT/adapters/capevolve.yaml"
 VENV="$REPO/.venv"
 CAPEVOLVE="$VENV/bin/cap-evolve"
+OPTIMIZER_CLAUDE_DIR="$PROJECT/optimizer-claude"
+GLM_MODEL="rits/zai-org/glm-5-3"
+GATEWAY_URL="${ANTHROPIC_BASE_URL:-https://ai-gateway-unified-ai-gateway-dogfood.dogfood-us-south-1-bxf-4x-f196230f74f7ff44a5b4eeb1003c5bd5-0000.us-south.containers.appdomain.cloud}"
 
 # Harbor CLI: venv first, then PATH (~/.local/bin from `uv tool install harbor`).
 if [ -x "${HARBOR_BIN:-}" ]; then
@@ -31,19 +41,22 @@ else
   HARBOR=""
 fi
 
-# --- LiteLLM / model -------------------------------------------------------
-NAMESPACE="${LITELLM_NAMESPACE:-skill-optimization}"
-MODEL="${HARBOR_MODEL:-gpt-5.6-luna}"
-HARBOR_PROXY_URL="${HARBOR_AGENT_BASE_URL:-http://litellm-proxy.${NAMESPACE}.svc:4000}"
-OPTIMIZER_PROXY_URL="${ANTHROPIC_BASE_URL:-${LITELLM_PROXY_LOCAL:-http://localhost:4000}}"
+HARBOR_MODEL_NAME="${HARBOR_MODEL:-$GLM_MODEL}"
+OPTIMIZER_MODEL_NAME="${OPTIMIZER_MODEL:-$GLM_MODEL}"
 
-if [ -z "${LITELLM_MASTER_KEY:-}" ] && command -v oc >/dev/null 2>&1; then
-  LITELLM_MASTER_KEY="$(oc get secret litellm-proxy -n "$NAMESPACE" \
-    -o jsonpath='{.data.LITELLM_MASTER_KEY}' 2>/dev/null | base64 -d 2>/dev/null || true)"
-fi
-if [ -z "${LITELLM_MASTER_KEY:-}" ]; then
-  echo "error: set LITELLM_MASTER_KEY or ensure oc can read secret litellm-proxy in $NAMESPACE" >&2
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "error: set ANTHROPIC_API_KEY (AI gateway key) before running" >&2
   exit 1
+fi
+if [ ! -f "$OPTIMIZER_CLAUDE_DIR/settings.json" ]; then
+  echo "error: missing $OPTIMIZER_CLAUDE_DIR/settings.json (GLM behavesAs)" >&2
+  exit 1
+fi
+
+# Isolated Claude config: behavesAs for GLM. Seed onboarding so -p does not hang.
+CLAUDE_JSON="$OPTIMIZER_CLAUDE_DIR/.claude.json"
+if [ ! -f "$CLAUDE_JSON" ] || ! grep -q '"hasCompletedOnboarding": true' "$CLAUDE_JSON" 2>/dev/null; then
+  printf '%s\n' '{"hasCompletedOnboarding":true,"migrationVersion":14}' > "$CLAUDE_JSON"
 fi
 
 # --- Harbor (evals on OpenShift) -------------------------------------------
@@ -53,18 +66,21 @@ RUN_TS="${RUN_TS:-swebench-pilot}"
 export HARBOR_BIN="$HARBOR"
 export HARBOR_DATASET="${HARBOR_DATASET:-swe-bench/swe-bench-verified}"
 export HARBOR_AGENT="${HARBOR_AGENT:-claude-code}"
-export HARBOR_MODEL="$MODEL"
+export HARBOR_MODEL="$HARBOR_MODEL_NAME"
 export HARBOR_PARALLEL="${HARBOR_PARALLEL:-16}"
 export HARBOR_TIMEOUT="${HARBOR_TIMEOUT:-1800}"
 export HARBOR_EXTRA_FLAGS="${HARBOR_EXTRA_FLAGS:--e openshift}"
 export HARBOR_TASK_IDS="$(tr '\n' ',' < "$TASK_IDS_FILE" | sed 's/,$//')"
-export HARBOR_AGENT_BASE_URL="$HARBOR_PROXY_URL"
-export HARBOR_AGENT_API_KEY="$LITELLM_MASTER_KEY"
+export HARBOR_AGENT_BASE_URL="$GATEWAY_URL"
+export HARBOR_AGENT_API_KEY="$ANTHROPIC_API_KEY"
 
-# --- Optimizer (local claude-code → LiteLLM via port-forward or Route) -----
+# --- Optimizer (local claude-code → GLM) -----------------------------------
 unset CLAUDE_CODE_USE_VERTEX CLOUD_ML_REGION ANTHROPIC_VERTEX_PROJECT_ID
-export ANTHROPIC_BASE_URL="$OPTIMIZER_PROXY_URL"
-export ANTHROPIC_API_KEY="$LITELLM_MASTER_KEY"
+export ANTHROPIC_BASE_URL="$GATEWAY_URL"
+export ANTHROPIC_API_KEY
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+export CLAUDE_CONFIG_DIR="$OPTIMIZER_CLAUDE_DIR"
+export CAPEVOLVE_OPTIMIZER_MODEL="$OPTIMIZER_MODEL_NAME"
 
 # --- cap-evolve ------------------------------------------------------------
 export PYTHONPATH="$PROJECT/adapters:$REPO"
@@ -87,10 +103,10 @@ if [ -f "$REPO/.capevolve/run_${RUN_TS}/baseline.json" ]; then
   echo "warning: .capevolve/run_${RUN_TS} already has a baseline — use RUN_TS=<new-name> or delete it" >&2
 fi
 
-echo "==> Harbor:  $HARBOR ($HARBOR_AGENT @ $MODEL on OpenShift, $HARBOR_PROXY_URL)"
-echo "==> Optimizer: claude-code @ $MODEL via $OPTIMIZER_PROXY_URL"
+echo "==> Harbor:  $HARBOR ($HARBOR_AGENT @ $HARBOR_MODEL_NAME on OpenShift)"
+echo "==> Optimizer: --model $OPTIMIZER_MODEL_NAME (CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR)"
 echo "==> Tasks: $(echo "$HARBOR_TASK_IDS" | tr ',' '\n' | wc -l) from $(basename "$TASK_IDS_FILE")"
-echo "==> Run dir: .capevolve/runs/$RUN_TS"
+echo "==> Run dir: .capevolve/run_${RUN_TS}"
 
 "$CAPEVOLVE" run \
   --spec "$SPEC" \
